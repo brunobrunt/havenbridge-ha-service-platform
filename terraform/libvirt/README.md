@@ -1,4 +1,4 @@
-# Ever Presence Haven Kubernetes Platform
+# HavenBridge Community Services Kubernetes Platform
 
 ## Infrastructure Provisioning with Terraform, KVM/libvirt and Cloud-init
 
@@ -6,13 +6,13 @@
 **Project owner:** Adeola Alabi
 **Host system:** Dell Precision 5810
 **Host operating system:** Ubuntu 24.04 LTS
-**Primary objective:** Build a production-like Kubernetes platform for the Ever Presence Haven Connect prototype.
+**Primary objective:** Build a production-like Kubernetes platform for the HavenBridge Community Services Connect prototype.
 
 ---
 
 ## 1. Project Overview
 
-This project provisions and configures a highly available Kubernetes lab environment for a proposed Ever Presence Haven service-inquiry and staff-coordination application.
+This project provisions and configures a highly available Kubernetes lab environment for a proposed HavenBridge Community Services service-inquiry and staff-coordination application.
 
 The infrastructure will use:
 
@@ -39,7 +39,7 @@ Although the Kubernetes control plane will be highly available at the virtual-ma
 
 The proposed application is called:
 
-## Ever Presence Haven Connect
+## HavenBridge Community Services Connect
 
 The prototype is intended to demonstrate a centralized platform for:
 
@@ -341,7 +341,7 @@ kubeadm will:
 Planned directory structure:
 
 ```text
-everpresence-haven-platform/
+havenbridge-ha-service-platform/
 └── terraform/
     └── libvirt/
         ├── versions.tf
@@ -660,7 +660,7 @@ dpkg-query -W cloud-image-utils
 * Do not commit private SSH keys.
 * Do not commit Terraform state files.
 * Do not place real passwords in Terraform source files.
-* Do not use real Ever Presence Haven client information.
+* Do not use real HavenBridge Community Services client information.
 * Do not store sensitive health or employee data in the prototype.
 * Use fictional demonstration data.
 * Restrict VM access to the private lab network.
@@ -751,7 +751,7 @@ Deploy:
 
 ### Phase 5: Application deployment
 
-Deploy the Ever Presence Haven Connect prototype.
+Deploy the HavenBridge Community Services Connect prototype.
 
 ### Phase 6: Security and reliability
 
@@ -873,7 +873,7 @@ Success! The configuration is valid.
 ```
 ## Successful Infrastructure Deployment
 
-Terraform successfully provisioned the initial Ever Presence Haven Kubernetes lab environment.
+Terraform successfully provisioned the initial HavenBridge Community Services Kubernetes lab environment.
 
 ### Deployed virtual machines
 

@@ -1,6 +1,6 @@
-# Ever Presence Haven Highly Available Service Platform
+# HavenBridge Community Services Highly Available Service Platform
 
-A portfolio-grade infrastructure and application platform designed around a real operational use case for Ever Presence Haven.
+A portfolio-grade infrastructure and application platform designed around a real operational use case for HavenBridge Community Services.
 
 The project provisions a five-node Kubernetes cluster on KVM/libvirt, configures the nodes with Ansible, builds a highly available kubeadm control plane, and prepares the platform to host an internal **Service Inquiry and Referral Tracking Platform**.
 
@@ -10,11 +10,11 @@ The project provisions a five-node Kubernetes cluster on KVM/libvirt, configures
 
 ## Project Goal
 
-Ever Presence Haven provides services such as home care, respite care, disability services, residential care, community access, Indigenous support, and employee resources.
+HavenBridge Community Services provides services such as home care, respite care, disability services, residential care, community access, Indigenous support, and employee resources.
 
 The project translates that business context into a practical platform engineering solution:
 
-**Ever Presence Haven Service Inquiry and Referral Tracking Platform**
+**HavenBridge Community Services Service Inquiry and Referral Tracking Platform**
 
 Authorized staff will eventually be able to:
 
@@ -35,7 +35,7 @@ The Kubernetes cluster is not the final product by itself. It is the highly avai
 
 The completed portfolio story is intended to be:
 
-> I designed and built a highly available Kubernetes service platform for Ever Presence Haven. Terraform provisions the KVM infrastructure, Ansible configures the Linux and Kubernetes nodes, kubeadm builds a three-control-plane cluster, kube-vip provides a shared API endpoint, Calico provides Pod networking, and the platform is being extended to host a service inquiry and referral tracking application with Prometheus, Grafana, and Alertmanager observability.
+> I designed and built a highly available Kubernetes service platform for HavenBridge Community Services. Terraform provisions the KVM infrastructure, Ansible configures the Linux and Kubernetes nodes, kubeadm builds a three-control-plane cluster, kube-vip provides a shared API endpoint, Calico provides Pod networking, and the platform is being extended to host a service inquiry and referral tracking application with Prometheus, Grafana, and Alertmanager observability.
 
 ---
 
@@ -162,7 +162,7 @@ Network configuration:
 ## Repository Layout
 
 ```text
-everpresence-haven-platform/
+havenbridge-ha-service-platform/
 ├── README.md
 ├── terraform/
 │   └── libvirt/
@@ -529,4 +529,4 @@ git diff --cached | grep -Ei \
 7. Build the first FastAPI/PostgreSQL inquiry workflow using synthetic data.
 8. Add Prometheus, Grafana and Alertmanager after the application is running.
 
-The project remains focused on one outcome: a reliable platform that can host and operate the Ever Presence Haven Service Inquiry and Referral Tracking Platform.
+The project remains focused on one outcome: a reliable platform that can host and operate the HavenBridge Community Services Service Inquiry and Referral Tracking Platform.

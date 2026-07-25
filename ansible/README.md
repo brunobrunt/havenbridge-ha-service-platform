@@ -1,6 +1,6 @@
 # Ansible Configuration Management
 
-This directory contains the Ansible configuration used to prepare and configure the Ever Presence Haven Kubernetes cluster.
+This directory contains the Ansible configuration used to prepare and configure the HavenBridge Community Services Kubernetes cluster.
 
 Terraform creates the virtual machines. Ansible connects to those machines over SSH and configures the operating system, container runtime, Kubernetes packages, shared API endpoint, kube-vip, and kubeadm settings.
 
