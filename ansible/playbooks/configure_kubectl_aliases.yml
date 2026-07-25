@@ -1,0 +1,13 @@
+---
+# Configure kubectl aliases on every Kubernetes control-plane node.
+#
+# Worker nodes are excluded because the regular mino user does not
+# currently have an administrative kubeconfig on those nodes.
+
+- name: Configure kubectl aliases on control-plane nodes
+  hosts: control_plane
+  become: true
+  gather_facts: false
+
+  roles:
+    - role: kubectl_aliases

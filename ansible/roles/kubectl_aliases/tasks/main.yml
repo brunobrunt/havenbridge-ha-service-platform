@@ -1,0 +1,74 @@
+---
+# Configure commonly used kubectl aliases for the mino user
+# on Kubernetes control-plane nodes.
+
+- name: Install Bash completion
+  ansible.builtin.apt:
+    name: bash-completion
+    state: present
+    update_cache: false
+
+- name: Configure kubectl aliases and completion
+  ansible.builtin.blockinfile:
+    path: /home/mino/.bashrc
+    owner: mino
+    group: mino
+    mode: "0644"
+    create: true
+    marker: "# {mark} ANSIBLE MANAGED KUBECTL ALIASES"
+    block: |
+      # Enable kubectl Bash completion.
+      if command -v kubectl >/dev/null 2>&1; then
+        source <(kubectl completion bash)
+
+        # Main kubectl shortcut.
+        alias k='kubectl'
+        complete -o default -F __start_kubectl k
+      fi
+
+      # Cluster and node information.
+      alias kgn='kubectl get nodes -o wide'
+      alias kctx='kubectl config current-context'
+      alias kns='kubectl config set-context --current --namespace'
+
+      # Pod information.
+      alias kgp='kubectl get pods'
+      alias kgpw='kubectl get pods -o wide'
+      alias kgpa='kubectl get pods -A'
+      alias kgpaw='kubectl get pods -A -o wide'
+
+      # Common Kubernetes resources.
+      alias kga='kubectl get all'
+      alias kgaa='kubectl get all -A'
+      alias kgd='kubectl get deployments'
+      alias kgs='kubectl get services'
+      alias kgi='kubectl get ingress'
+      alias kgcm='kubectl get configmaps'
+      alias kgsec='kubectl get secrets'
+      alias kgpvc='kubectl get pvc'
+
+      # Describe resources.
+      alias kdp='kubectl describe pod'
+      alias kdn='kubectl describe node'
+      alias kdd='kubectl describe deployment'
+      alias kds='kubectl describe service'
+
+      # Logs and troubleshooting.
+      alias kl='kubectl logs'
+      alias klf='kubectl logs -f'
+      alias kev='kubectl get events -A --sort-by=.metadata.creationTimestamp'
+
+      # Apply and delete manifest files.
+      alias kaf='kubectl apply -f'
+      alias kdf='kubectl delete -f'
+
+      # Project-specific platform checks.
+      alias ksys='kubectl get pods -n kube-system -o wide'
+      alias kcal='kubectl get pods -n calico-system -o wide'
+      alias ktig='kubectl get tigerastatus'
+      alias kvip='kubectl get pods -n kube-system -o wide | grep kube-vip'
+      alias ketcd='kubectl get pods -n kube-system -o wide | grep etcd-'
+
+      # Continuously monitor the cluster.
+      alias kwp='watch kubectl get pods -A -o wide'
+      alias kwn='watch kubectl get nodes -o wide'

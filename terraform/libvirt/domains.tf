@@ -34,6 +34,16 @@ resource "libvirt_domain" "node" {
   memory_unit = "MiB"
   vcpu        = each.value.vcpu
 
+  # Expose the Dell host CPU features to the VM.
+  #
+  # The default qemu64 model does not provide the x86-64-v2
+  # instruction level required by some modern container images.
+  # Pass the physical host's CPU features through to the VM.
+
+  cpu = {
+    mode = "host-passthrough"
+  }
+
   # Start the VM after Terraform creates it.
   running = true
 

@@ -1,13 +1,22 @@
 ---
-# Prepare kube-vip on the first control-plane node only.
+# Deploy the kube-vip static Pod manifest to Kubernetes
+# control-plane nodes.
 #
-# The remaining control-plane nodes receive the manifest
-# after they join the Kubernetes cluster.
+# The --limit option can be used to deploy kube-vip to one
+# control-plane node at a time.
+#
+# Examples:
+#
+#   ansible-playbook playbooks/prepare_kube_vip.yml \
+#     --limit eph-cp02
+#
+#   ansible-playbook playbooks/prepare_kube_vip.yml \
+#     --limit eph-cp03
 
-- name: Prepare kube-vip on the first control plane
-  hosts: eph-cp01
+- name: Prepare kube-vip on control-plane nodes
+  hosts: control_plane
   become: true
   gather_facts: false
 
   roles:
-    - kube_vip
+    - role: kube_vip

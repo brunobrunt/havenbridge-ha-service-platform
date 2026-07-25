@@ -54,7 +54,7 @@ kube_vip_manifest_path: "/etc/kubernetes/manifests/kube-vip.yaml"
 
 # During kubeadm initialization, kube-vip temporarily
 # uses super-admin.conf to communicate with Kubernetes.
-kube_vip_kubeconfig_host_path: "/etc/kubernetes/super-admin.conf"
+kube_vip_kubeconfig_host_path: "/etc/kubernetes/admin.conf"
 
 # Exact Kubernetes version installed on the nodes.
 kubernetes_version: "v1.36.2"

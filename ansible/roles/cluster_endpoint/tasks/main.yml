@@ -2,19 +2,49 @@
 # This role prepares the shared Kubernetes API endpoint.
 #
 # It does not activate the virtual IP.
-# It only makes k8s-api.lab resolve to 172.16.10.30
-# and confirms that the kube-vip network interface exists.
+# kube-vip activates 172.16.10.30 later.
+#
+# This role:
+#   1. Adds k8s-api.lab to the cloud-init hosts template.
+#   2. Adds k8s-api.lab to the active /etc/hosts file.
+#   3. Confirms the hostname resolves to the expected VIP.
+#   4. Confirms the kube-vip network interface exists.
+#
+# cloud-init was originally configured with:
+#
+#   manage_etc_hosts: true
+#
+# Therefore, /etc/hosts is regenerated from
+# /etc/cloud/templates/hosts.debian.tmpl during every reboot.
+# The endpoint must be added to both files.
 
-# regexp searches for any existing line ending with k8s-api.lab.
-# If found, lineinfile replaces it with the correct VIP entry.
-# This prevents duplicate or outdated /etc/hosts entries.
-
-- name: Add Kubernetes API endpoint to /etc/hosts
+- name: Add Kubernetes API endpoint to cloud-init hosts template
+  become: true
   ansible.builtin.lineinfile:
-    path: /etc/hosts
-    regexp: '.*\s+k8s-api\.lab$'
+    path: /etc/cloud/templates/hosts.debian.tmpl
+
+    # Replace any old line containing k8s-api.lab.
+    # This prevents duplicate or outdated endpoint entries.
+    regexp: '^[^#]*\s+k8s-api\.lab(\s|$)'
+
     line: "{{ control_plane_vip }} {{ control_plane_endpoint_name }}"
     state: present
+    create: false
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Add Kubernetes API endpoint to active hosts file
+  become: true
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+
+    # Replace any existing line containing k8s-api.lab.
+    regexp: '^[^#]*\s+k8s-api\.lab(\s|$)'
+
+    line: "{{ control_plane_vip }} {{ control_plane_endpoint_name }}"
+    state: present
+    create: true
     owner: root
     group: root
     mode: "0644"
@@ -41,20 +71,16 @@
 - name: Validate Kubernetes API endpoint preparation
   ansible.builtin.assert:
     that:
+      - api_name_resolution.rc == 0
       - control_plane_vip in api_name_resolution.stdout
       - kube_vip_interface_status.rc == 0
-    success_msg: >-
-      {{ inventory_hostname }} can resolve
-      {{ control_plane_endpoint_name }} to {{ control_plane_vip }}.
     fail_msg: >-
-      {{ inventory_hostname }} failed the Kubernetes API
-      endpoint validation.
-
-- name: Display endpoint summary
-  ansible.builtin.debug:
-    msg:
-      - "Node: {{ inventory_hostname }}"
-      - "API name: {{ control_plane_endpoint_name }}"
-      - "API VIP: {{ control_plane_vip }}"
-      - "API port: {{ control_plane_port }}"
-      - "kube-vip interface: {{ kube_vip_interface }}"
+      Kubernetes API endpoint preparation failed.
+      Confirm that {{ control_plane_endpoint_name }} resolves to
+      {{ control_plane_vip }} and that network interface
+      {{ kube_vip_interface }} exists.
+    success_msg: >-
+      Kubernetes API endpoint preparation succeeded.
+      {{ control_plane_endpoint_name }} resolves to
+      {{ control_plane_vip }}, and interface
+      {{ kube_vip_interface }} exists.
