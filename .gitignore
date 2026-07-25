@@ -143,3 +143,7 @@ admin.conf
 # ============================================================
 Thumbs.db
 desktop.ini
+
+# Local editor and documentation backups
+*.backup
+*.backup_*
