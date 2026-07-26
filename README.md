@@ -1,33 +1,35 @@
-# HavenBridge Community Services Highly Available Service Platform
+A portfolio-grade infrastructure, Kubernetes, application, and observability platform designed around a fictional community-services organization called **HavenBridge Community Services**.
 
-A portfolio-grade infrastructure and application platform designed around a real operational use case for HavenBridge Community Services.
+The project provisions a five-node Kubernetes cluster on KVM/libvirt, configures the nodes with Ansible, builds a highly available kubeadm control plane, provides application traffic routing through MetalLB and Traefik Gateway API, and delivers dynamically provisioned NFS-backed persistent storage.
 
-The project provisions a five-node Kubernetes cluster on KVM/libvirt, configures the nodes with Ansible, builds a highly available kubeadm control plane, and prepares the platform to host an internal **Service Inquiry and Referral Tracking Platform**.
+The platform is being developed to host the **HavenBridge Service Inquiry and Referral Tracking Platform**.
 
 > **Privacy rule:** only synthetic demonstration data may be used. Do not store real client, health, disability, employee, referral, or personally identifiable information in this public repository or the homelab.
+
+> **Naming note:** the existing VM names use the `eph-` prefix because they were created earlier in the project. These internal infrastructure identifiers are retained to avoid unnecessary changes to Kubernetes node names, certificates, etcd membership, and automation inventory.
 
 ---
 
 ## Project Goal
 
-HavenBridge Community Services provides services such as home care, respite care, disability services, residential care, community access, Indigenous support, and employee resources.
+HavenBridge Community Services is a fictional organization representing a provider of services such as home care, respite care, disability support, residential care, community access, family support, and employee resources.
 
-The project translates that business context into a practical platform engineering solution:
+The project translates that operational context into a practical platform-engineering solution:
 
-**HavenBridge Community Services Service Inquiry and Referral Tracking Platform**
+**HavenBridge Service Inquiry and Referral Tracking Platform**
 
 Authorized staff will eventually be able to:
 
-- Record service inquiries and referrals.
-- Select the requested service category.
-- Assign an inquiry to a coordinator.
-- Track statuses such as `New`, `Assigned`, `Under Review`, `Contacted`, `Awaiting Information`, and `Closed`.
-- See overdue or unassigned inquiries.
-- View basic operational dashboards.
-- Receive notifications when requests exceed a defined response period.
-- Access approved internal policies or employee resources.
+* Record service inquiries and referrals.
+* Select the requested service category.
+* Assign an inquiry to a coordinator.
+* Track statuses such as `New`, `Assigned`, `Under Review`, `Contacted`, `Awaiting Information`, and `Closed`.
+* Identify overdue or unassigned inquiries.
+* View basic operational dashboards.
+* Receive notifications when requests exceed a defined response period.
+* Access approved internal policies or employee resources.
 
-The Kubernetes cluster is not the final product by itself. It is the highly available foundation on which this operational application will run.
+The Kubernetes cluster is not the final product by itself. It is the highly available foundation on which the operational application, database, routing, persistent storage, monitoring, and alerting services will run.
 
 ---
 
@@ -35,22 +37,35 @@ The Kubernetes cluster is not the final product by itself. It is the highly avai
 
 The completed portfolio story is intended to be:
 
-> I designed and built a highly available Kubernetes service platform for HavenBridge Community Services. Terraform provisions the KVM infrastructure, Ansible configures the Linux and Kubernetes nodes, kubeadm builds a three-control-plane cluster, kube-vip provides a shared API endpoint, Calico provides Pod networking, and the platform is being extended to host a service inquiry and referral tracking application with Prometheus, Grafana, and Alertmanager observability.
+> I designed and built a highly available Kubernetes service platform for a fictional community-services organization. Terraform provisions the KVM infrastructure, Ansible configures the Linux and Kubernetes nodes, kubeadm builds a three-control-plane cluster, kube-vip provides a shared API endpoint, and Calico provides Pod networking. MetalLB and Traefik Gateway API provide application access, while the NFS CSI driver supplies dynamically provisioned persistent storage. The platform is being extended to host a service inquiry and referral tracking application with PostgreSQL, Prometheus, Grafana, and Alertmanager.
 
 ---
 
 ## Architecture
 
-### Application architecture
+### Application access architecture
 
 ```text
 Staff user
     |
     v
-Ingress Controller
+havenbridge.lab
+172.16.10.40
     |
     v
-Service Inquiry Web Application
+MetalLB Layer 2 advertisement
+    |
+    v
+Traefik LoadBalancer Service
+    |
+    v
+Gateway: havenbridge-gateway
+    |
+    v
+HTTPRoute
+    |
+    v
+HavenBridge Web Application
     |
     +-----------------------+
     |                       |
@@ -65,6 +80,8 @@ PostgreSQL Database     Notification Worker
                             v
                      Email / internal alerts
 ```
+
+The backend application Services remain internal Kubernetes `ClusterIP` Services. They do not require separate external IP addresses because Traefik receives external traffic at `172.16.10.40` and routes requests to the appropriate internal Service.
 
 ### Kubernetes cluster topology
 
@@ -91,34 +108,72 @@ PostgreSQL Database     Notification Worker
          172.16.10.34              172.16.10.35
 ```
 
-The five virtual machines run on a Dell Precision 5810 host using KVM and libvirt. The three control-plane nodes provide a stacked-etcd quorum, while kube-vip exposes the shared Kubernetes API endpoint at `172.16.10.30`. Application workloads are scheduled primarily on the two worker nodes.
+The five virtual machines run on a Dell Precision 5810 host using KVM and libvirt.
+
+The three control-plane nodes provide a stacked-etcd quorum. kube-vip exposes the shared Kubernetes API endpoint at `172.16.10.30`, while application workloads are scheduled primarily on the two worker nodes.
+
+### Persistent storage architecture
+
+```text
+Application Pod
+    |
+    v
+PersistentVolumeClaim
+    |
+    v
+StorageClass: havenbridge-nfs
+    |
+    v
+NFS CSI Driver
+    |
+    v
+NFS server: 172.16.10.1
+    |
+    v
+syrus:/data_all/havenbridge-nfs
+```
+
+The `havenbridge-nfs` StorageClass supports dynamic provisioning. Applications create a PersistentVolumeClaim without requiring an administrator to create a matching PersistentVolume manually.
+
+The NFS CSI provisioner creates the PersistentVolume and its backing NFS subdirectory automatically.
 
 ---
 
 ## Current Cluster Topology
 
-| Node | IP address | Role | vCPU | Memory | Disk |
-|---|---:|---|---:|---:|---:|
-| `eph-cp01` | `172.16.10.31` | Control plane + etcd | 2 | 4 GiB | 40 GiB |
-| `eph-cp02` | `172.16.10.32` | Control plane + etcd | 2 | 4 GiB | 40 GiB |
-| `eph-cp03` | `172.16.10.33` | Control plane + etcd | 2 | 4 GiB | 40 GiB |
-| `eph-worker01` | `172.16.10.34` | Worker | 2 | 8 GiB | 60 GiB |
-| `eph-worker02` | `172.16.10.35` | Worker | 2 | 8 GiB | 60 GiB |
-| Reserved | `172.16.10.36` | Future worker | TBD | TBD | TBD |
+| Node           |     IP address | Role                 | vCPU | Memory |   Disk |
+| -------------- | -------------: | -------------------- | ---: | -----: | -----: |
+| `eph-cp01`     | `172.16.10.31` | Control plane + etcd |    2 |  4 GiB | 40 GiB |
+| `eph-cp02`     | `172.16.10.32` | Control plane + etcd |    2 |  4 GiB | 40 GiB |
+| `eph-cp03`     | `172.16.10.33` | Control plane + etcd |    2 |  4 GiB | 40 GiB |
+| `eph-worker01` | `172.16.10.34` | Worker               |    2 |  8 GiB | 60 GiB |
+| `eph-worker02` | `172.16.10.35` | Worker               |    2 |  8 GiB | 60 GiB |
+| Reserved       | `172.16.10.36` | Future worker        |  TBD |    TBD |    TBD |
 
-Network configuration:
+Network and platform configuration:
 
-| Purpose | Value |
-|---|---|
-| Libvirt node network | `172.16.10.0/24` |
-| Libvirt gateway | `172.16.10.1` |
-| Kubernetes API DNS name | `k8s-api.lab` |
-| kube-vip virtual IP | `172.16.10.30/32` |
-| Kubernetes API port | `6443` |
-| Pod network | `10.244.0.0/16` |
-| Service network | `10.96.0.0/12` |
-| Calico encapsulation | VXLAN |
-| SSH user | `mino` |
+| Purpose                        | Value                       |
+| ------------------------------ | --------------------------- |
+| Libvirt node network           | `172.16.10.0/24`            |
+| Libvirt gateway and NFS server | `172.16.10.1`               |
+| Kubernetes API DNS name        | `k8s-api.lab`               |
+| kube-vip virtual IP            | `172.16.10.30/32`           |
+| Kubernetes API port            | `6443`                      |
+| Application hostname           | `havenbridge.lab`           |
+| MetalLB application IP         | `172.16.10.40`              |
+| Pod network                    | `10.244.0.0/16`             |
+| Service network                | `10.96.0.0/12`              |
+| Calico encapsulation           | VXLAN                       |
+| NFS export                     | `/data_all/havenbridge-nfs` |
+| Default StorageClass           | `havenbridge-nfs`           |
+| SSH user                       | `mino`                      |
+
+The application IP and Kubernetes API IP serve different purposes:
+
+| Address        | Purpose                                              |
+| -------------- | ---------------------------------------------------- |
+| `172.16.10.30` | Shared Kubernetes API endpoint provided by kube-vip  |
+| `172.16.10.40` | Application LoadBalancer address provided by MetalLB |
 
 ---
 
@@ -126,36 +181,53 @@ Network configuration:
 
 ### Infrastructure
 
-- Ubuntu 24.04 host
-- KVM, QEMU and libvirt
-- QCOW2 virtual disks
-- cloud-init
-- Terraform
-- `dmacvicar/libvirt` provider
+* Ubuntu 24.04 host
+* Dell Precision 5810
+* KVM, QEMU and libvirt
+* QCOW2 virtual disks
+* cloud-init
+* Terraform
+* `dmacvicar/libvirt` provider
 
 ### Configuration and Kubernetes
 
-- Ansible
-- Ubuntu 24.04.4 LTS guests
-- Kubernetes v1.36.2
-- kubeadm, kubelet and kubectl
-- CRI-O v1.36.2
-- kube-vip v1.2.1
-- Calico v3.32.1
-- Three-member stacked etcd
-- Tigera Operator and Calico API server
+* Ansible
+* Ubuntu 24.04.4 LTS guests
+* Kubernetes v1.36.2
+* kubeadm, kubelet and kubectl
+* CRI-O v1.36.2
+* kube-vip v1.2.1
+* Calico v3.32.1
+* Tigera Operator
+* Calico API server
+* Three-member stacked etcd
+
+### Platform services
+
+* Helm
+* MetalLB v0.16.1
+* Kubernetes Gateway API
+* Traefik Helm chart v41.0.2
+* Traefik Proxy v3.7.6
+* NFS server
+* NFS CSI Driver v4.13.4
+* Dynamic PersistentVolume provisioning
+* `ReadWriteMany` shared storage
 
 ### Planned application and operations
 
-- Python FastAPI backend
-- Web frontend
-- PostgreSQL
-- Helm
-- Ingress controller
-- Prometheus
-- Grafana
-- Alertmanager
-- Application metrics and alert rules
+* Python FastAPI backend
+* Web frontend
+* PostgreSQL
+* Notification worker
+* ConfigMaps and Secrets
+* NetworkPolicies
+* Kubernetes RBAC
+* TLS
+* Prometheus
+* Grafana
+* Alertmanager
+* Application metrics and alert rules
 
 ---
 
@@ -188,14 +260,25 @@ havenbridge-ha-service-platform/
 │   │   └── group_vars/
 │   │       └── all.yml
 │   ├── playbooks/
+│   │   └── install_nfs_clients.yml
 │   └── roles/
-└── kubernetes/                     # Planned application/platform manifests
+└── kubernetes/
+    ├── platform/
+    │   ├── metallb/
+    │   │   ├── values.yaml
+    │   │   └── l2-address-pool.yaml
+    │   ├── traefik/
+    │   │   └── values.yaml
+    │   ├── gateway/
+    │   │   └── nginx-validation-route.yaml
+    │   └── storage/
+    │       └── nfs-storageclass.yaml
     ├── applications/
-    │   └── everpresence-referrals/
+    │   └── havenbridge/
     └── monitoring/
 ```
 
-`terraform.tfvars`, private keys, kubeconfig files, join commands, tokens, certificate keys, application secrets, and real client information must never be committed.
+`terraform.tfvars`, private keys, kubeconfig files, join commands, tokens, certificate keys, application secrets, real client information, and other sensitive files must never be committed.
 
 ---
 
@@ -203,54 +286,92 @@ havenbridge-ha-service-platform/
 
 ### Infrastructure
 
-- [x] Created a dedicated libvirt storage pool.
-- [x] Imported an Ubuntu cloud image.
-- [x] Provisioned five persistent QCOW2 VM disks.
-- [x] Generated cloud-init seed images.
-- [x] Created three control-plane VMs and two worker VMs.
-- [x] Assigned deterministic MAC addresses and static node IPs.
-- [x] Enabled QEMU guest agent support.
-- [x] Changed the VM CPU model from `qemu64` to `host-passthrough`.
-- [x] Confirmed Terraform can update the domains in place without destroying disks.
+* [x] Created a dedicated libvirt storage pool.
+* [x] Imported an Ubuntu cloud image.
+* [x] Provisioned five persistent QCOW2 VM disks.
+* [x] Generated cloud-init seed images.
+* [x] Created three control-plane VMs and two worker VMs.
+* [x] Assigned deterministic MAC addresses and static node IPs.
+* [x] Enabled QEMU guest agent support.
+* [x] Changed the VM CPU model from `qemu64` to `host-passthrough`.
+* [x] Confirmed Terraform can update the domains in place without destroying disks.
 
 ### Node configuration
 
-- [x] Completed Ansible connectivity and preflight validation.
-- [x] Disabled swap.
-- [x] Loaded `overlay` and `br_netfilter`.
-- [x] Applied Kubernetes networking sysctl settings.
-- [x] Installed and configured CRI-O.
-- [x] Installed kubeadm, kubelet and kubectl v1.36.2.
-- [x] Held Kubernetes packages at the selected version.
-- [x] Configured persistent resolution for `k8s-api.lab`.
-- [x] Configured the CRI-O pause image expected by kubeadm.
+* [x] Completed Ansible connectivity and preflight validation.
+* [x] Disabled swap.
+* [x] Loaded `overlay` and `br_netfilter`.
+* [x] Applied Kubernetes networking sysctl settings.
+* [x] Installed and configured CRI-O.
+* [x] Installed kubeadm, kubelet and kubectl v1.36.2.
+* [x] Held Kubernetes packages at the selected version.
+* [x] Configured persistent resolution for `k8s-api.lab`.
+* [x] Configured the CRI-O pause image expected by kubeadm.
+* [x] Installed `nfs-common` on all control-plane and worker nodes.
 
-### Kubernetes
+### Kubernetes cluster
 
-- [x] Initialized `eph-cp01`.
-- [x] Configured a three-member stacked-etcd control plane.
-- [x] Joined `eph-cp02` and `eph-cp03`.
-- [x] Joined `eph-worker01` and `eph-worker02`.
-- [x] Deployed kube-vip on all three control-plane nodes.
-- [x] Confirmed the shared API endpoint returns `ok`.
-- [x] Installed Calico using the Tigera Operator.
-- [x] Configured `10.244.0.0/16`, VXLAN, outbound NAT and `NodeInternalIP` detection.
-- [x] Deployed the Calico API server.
-- [x] Confirmed all TigeraStatus resources are available.
-- [x] Confirmed all five Kubernetes nodes are `Ready`.
+* [x] Initialized `eph-cp01`.
+* [x] Configured a three-member stacked-etcd control plane.
+* [x] Joined `eph-cp02` and `eph-cp03`.
+* [x] Joined `eph-worker01` and `eph-worker02`.
+* [x] Deployed kube-vip on all three control-plane nodes.
+* [x] Confirmed the shared API endpoint returns `ok`.
+* [x] Installed Calico using the Tigera Operator.
+* [x] Configured `10.244.0.0/16`, VXLAN, outbound NAT and `NodeInternalIP` detection.
+* [x] Deployed the Calico API server.
+* [x] Confirmed all TigeraStatus resources are available.
+* [x] Confirmed all five Kubernetes nodes are `Ready`.
+* [x] Confirmed cluster resources persisted after all VMs were rebooted.
 
-Current node view before optional worker-role labels:
+### Application routing
+
+* [x] Installed Helm.
+* [x] Installed MetalLB in Layer 2 mode.
+* [x] Created the `havenbridge-application-pool`.
+* [x] Reserved `172.16.10.40` for application traffic.
+* [x] Verified MetalLB ARP advertisement from `eph-worker01`.
+* [x] Verified TCP connectivity to port 80.
+* [x] Verified an nginx LoadBalancer Service returned `HTTP 200`.
+* [x] Installed the standard Kubernetes Gateway API CRDs.
+* [x] Installed Traefik with two replicas.
+* [x] Created a Traefik PodDisruptionBudget.
+* [x] Created the `traefik` GatewayClass.
+* [x] Created `havenbridge-gateway`.
+* [x] Created a cross-namespace HTTPRoute.
+* [x] Confirmed the Gateway reports `Programmed=True`.
+* [x] Confirmed the listener reports one attached route.
+* [x] Confirmed the route reports `Accepted=True`.
+* [x] Confirmed the route reports `ResolvedRefs=True`.
+* [x] Configured `havenbridge.lab` to resolve to `172.16.10.40`.
+* [x] Confirmed `http://havenbridge.lab` returns `HTTP 200`.
+
+### Persistent storage
+
+* [x] Installed and configured the NFS server on `syrus`.
+* [x] Exported `/data_all/havenbridge-nfs` to `172.16.10.0/24`.
+* [x] Confirmed the export was visible from control-plane and worker nodes.
+* [x] Completed a manual NFS mount and write test.
+* [x] Installed NFS CSI Driver v4.13.4.
+* [x] Confirmed the CSI controller is healthy.
+* [x] Confirmed one CSI node Pod runs on every Kubernetes node.
+* [x] Registered `nfs.csi.k8s.io` with Kubernetes.
+* [x] Created the default `havenbridge-nfs` StorageClass.
+* [x] Enabled dynamic PersistentVolume provisioning.
+* [x] Created a `ReadWriteMany` test PVC.
+* [x] Confirmed Kubernetes automatically created the matching PV.
+* [x] Wrote data from a Pod on `eph-worker01`.
+* [x] Deleted the writer Pod without deleting the PVC.
+* [x] Mounted the same PVC from a reader Pod on `eph-worker02`.
+* [x] Confirmed the original data remained available.
+
+Cross-node persistence evidence:
 
 ```text
-NAME           STATUS   ROLES           VERSION
-eph-cp01       Ready    control-plane   v1.36.2
-eph-cp02       Ready    control-plane   v1.36.2
-eph-cp03       Ready    control-plane   v1.36.2
-eph-worker01   Ready    <none>          v1.36.2
-eph-worker02   Ready    <none>          v1.36.2
+Written by Pod nfs-writer on node eph-worker01 at Sun Jul 26 18:45:47 UTC 2026
 ```
 
-The `<none>` role is normal until the optional `node-role.kubernetes.io/worker` labels are added.
+The reader Pod running on `eph-worker02` successfully retrieved that file from the original PersistentVolumeClaim.
 
 ---
 
@@ -258,47 +379,91 @@ The `<none>` role is normal until the optional `node-role.kubernetes.io/worker` 
 
 ### Phase 1 — Infrastructure as Code
 
-Terraform provisions the libvirt storage, cloud image, node disks, cloud-init media, network interfaces and VM domains.
+**Status: completed**
+
+Terraform provisions:
+
+* Libvirt storage.
+* Ubuntu cloud image.
+* Persistent VM disks.
+* Cloud-init media.
+* Network interfaces.
+* Virtual machine domains.
+* CPU and memory configuration.
+* Deterministic MAC addresses.
 
 Detailed instructions and troubleshooting:
 
-- [`terraform/libvirt/README.md`](terraform/libvirt/README.md)
+* [`terraform/libvirt/README.md`](terraform/libvirt/README.md)
 
 ### Phase 2 — Configuration and Kubernetes Bootstrap
 
-Ansible prepares the operating system, installs CRI-O and Kubernetes packages, configures the API endpoint, prepares kube-vip, and supports the kubeadm bootstrap process.
+**Status: completed**
+
+Ansible prepares the operating system, installs CRI-O and Kubernetes packages, configures the shared API endpoint, prepares kube-vip, installs NFS clients, and supports the kubeadm bootstrap process.
 
 Detailed instructions and troubleshooting:
 
-- [`ansible/README.md`](ansible/README.md)
+* [`ansible/README.md`](ansible/README.md)
 
 ### Phase 3 — Cluster Validation
 
-Planned validation work:
+**Status: core validation completed; failure testing deferred**
 
-- [ ] Label worker nodes.
-- [ ] Test Pod scheduling on both workers.
-- [ ] Test Pod-to-Pod communication.
-- [ ] Test Kubernetes DNS and Service discovery.
-- [ ] Test the kube-vip shared endpoint.
-- [ ] Test kube-vip failover between control planes.
-- [ ] Test control-plane API availability during a single-node outage.
-- [ ] Test etcd quorum behaviour.
-- [ ] Create an etcd backup and recovery runbook.
-- [ ] Validate reboot persistence for all nodes.
+Completed:
+
+* [x] Confirmed all five nodes are `Ready`.
+* [x] Tested workload scheduling on both workers.
+* [x] Tested Kubernetes Service access.
+* [x] Tested the kube-vip shared API endpoint.
+* [x] Validated the Calico IP pool and VXLAN configuration.
+* [x] Validated CoreDNS and application Service routing.
+* [x] Validated cluster persistence after VM reboots.
+
+Deferred resilience tests:
+
+* [ ] Add optional worker-role labels.
+* [ ] Perform a controlled kube-vip failover test.
+* [ ] Simulate one control-plane outage.
+* [ ] Confirm API availability during a control-plane outage.
+* [ ] Confirm etcd quorum with one member unavailable.
+* [ ] Simulate worker-node loss and verify workload rescheduling.
+* [ ] Create an etcd backup and recovery runbook.
+* [ ] Test etcd restore procedures.
 
 ### Phase 4 — Platform Services
 
-- [ ] Install an ingress controller.
-- [ ] Define an internal application DNS name.
-- [ ] Configure TLS.
-- [ ] Choose a persistent storage approach for the homelab.
-- [ ] Create application namespaces.
-- [ ] Establish ConfigMap and Secret handling.
-- [ ] Add NetworkPolicies.
-- [ ] Add application-specific RBAC.
+**Status: application routing and persistent storage completed**
+
+Completed:
+
+* [x] Install Helm.
+* [x] Install MetalLB.
+* [x] Reserve an application LoadBalancer IP.
+* [x] Install Gateway API CRDs.
+* [x] Install Traefik.
+* [x] Run two Traefik replicas.
+* [x] Define the `havenbridge.lab` application hostname.
+* [x] Create a Gateway and HTTPRoute.
+* [x] Validate hostname-based application routing.
+* [x] Configure NFS-backed shared storage.
+* [x] Install the NFS CSI driver.
+* [x] Create a default StorageClass.
+* [x] Validate dynamic PV provisioning.
+* [x] Validate cross-node data persistence.
+
+Remaining platform work:
+
+* [ ] Configure TLS for `havenbridge.lab`.
+* [ ] Create application namespaces.
+* [ ] Establish ConfigMap and Secret handling.
+* [ ] Add NetworkPolicies.
+* [ ] Add application-specific RBAC.
+* [ ] Define resource quotas and limit ranges where appropriate.
 
 ### Phase 5 — Inquiry and Referral Tracking Application
+
+**Status: next phase**
 
 Suggested application states:
 
@@ -325,7 +490,7 @@ Last updated time
 Internal demonstration notes
 ```
 
-Application components:
+Planned application components:
 
 ```text
 Frontend
@@ -335,56 +500,60 @@ Notification/SLA worker
 Synthetic seed data
 ```
 
-Application deployment should include:
+Application deployment will include:
 
-- Namespace
-- Deployments
-- Services
-- ConfigMaps
-- Secrets
-- PersistentVolumeClaims
-- Ingress
-- PodDisruptionBudgets
-- Resource requests and limits
-- Readiness and liveness probes
-- HorizontalPodAutoscaler where meaningful
+* Dedicated namespace.
+* PostgreSQL with an NFS-backed PersistentVolumeClaim.
+* Backend API Deployment and Service.
+* Frontend Deployment and Service.
+* Notification worker.
+* ConfigMaps.
+* Kubernetes Secrets.
+* Readiness and liveness probes.
+* Resource requests and limits.
+* PodDisruptionBudgets where meaningful.
+* Gateway API HTTPRoutes.
+* NetworkPolicies.
+* Application-specific RBAC.
+* HorizontalPodAutoscaler where meaningful.
 
 ### Phase 6 — Monitoring and Alerting
 
-This phase stays inside the original project scope because it provides operational visibility for both the cluster and the inquiry platform.
+This phase remains inside the project scope because it provides operational visibility for both the Kubernetes platform and the inquiry application.
 
 Planned components:
 
-- Prometheus
-- Grafana
-- Alertmanager
-- kube-state-metrics
-- Node Exporter
-- Prometheus Operator
-- ServiceMonitor or PodMonitor resources
-- PrometheusRule resources
-- Application dashboards
+* Prometheus
+* Grafana
+* Alertmanager
+* kube-state-metrics
+* Node Exporter
+* Prometheus Operator
+* ServiceMonitor or PodMonitor resources
+* PrometheusRule resources
+* Application dashboards
 
 Cluster alerts:
 
-- Node unavailable
-- Pod crash looping
-- Deployment replicas unavailable
-- High CPU or memory usage
-- Low disk space
-- PersistentVolume capacity risk
-- Kubernetes API unavailable
-- etcd member unhealthy
+* Node unavailable
+* Pod crash looping
+* Deployment replicas unavailable
+* High CPU or memory usage
+* Low disk space
+* PersistentVolume capacity risk
+* Kubernetes API unavailable
+* etcd member unhealthy
+* NFS server unavailable
 
 Application alerts:
 
-- Application endpoint unavailable
-- API error rate above threshold
-- High response latency
-- PostgreSQL unavailable
-- Notification worker failed
-- Inquiry unassigned beyond the response target
-- Inquiry under review beyond the service-level target
+* Application endpoint unavailable
+* API error rate above threshold
+* High response latency
+* PostgreSQL unavailable
+* Notification worker failed
+* Inquiry unassigned beyond the response target
+* Inquiry under review beyond the service-level target
 
 Only synthetic inquiry data will be used during testing.
 
@@ -392,7 +561,7 @@ Only synthetic inquiry data will be used during testing.
 
 ## High-Level Validation Commands
 
-Run from a configured control-plane node:
+### Kubernetes and Calico
 
 ```bash
 kubectl get nodes -o wide
@@ -420,35 +589,154 @@ Always
 true
 ```
 
+### MetalLB and Traefik
+
+```bash
+kubectl get ipaddresspools.metallb.io \
+  -n metallb-system
+
+kubectl get l2advertisements.metallb.io \
+  -n metallb-system
+
+kubectl get pods \
+  -n metallb-system \
+  -o wide
+
+kubectl get pods,svc \
+  -n traefik \
+  -o wide
+
+kubectl get gatewayclass
+kubectl get gateway -n traefik
+kubectl get httproute -A
+```
+
+Validate the application route:
+
+```bash
+curl -sS \
+  --max-time 10 \
+  -D - \
+  -o /dev/null \
+  http://havenbridge.lab/
+```
+
+Expected response:
+
+```text
+HTTP/1.1 200 OK
+Server: nginx/1.30.4
+```
+
+### NFS and persistent storage
+
+```bash
+kubectl get csidriver nfs.csi.k8s.io
+kubectl get storageclass
+kubectl get pvc -A
+kubectl get pv
+```
+
+Validate the persistence test:
+
+```bash
+kubectl get pod nfs-reader \
+  -n platform-validation \
+  -o wide
+
+kubectl exec \
+  -n platform-validation \
+  nfs-reader \
+  -- cat /data/persistence-proof.txt
+```
+
 ---
 
 ## Major Problems Solved
 
-The detailed runbooks contain the full commands and explanations. Important lessons include:
+The detailed runbooks contain the complete commands and explanations. Important lessons include:
 
-1. **The default `qemu64` CPU was too old for a modern Calico/Tigera image.**  
+1. **The default `qemu64` CPU was too old for a modern Calico/Tigera image.**
    The Tigera Operator failed with `Fatal glibc error: CPU does not support x86-64-v2`. Terraform was updated to use `cpu = { mode = "host-passthrough" }`.
 
-2. **Provider syntax matters.**  
+2. **Provider syntax matters.**
    With the installed libvirt provider, `cpu { ... }` was rejected as an unsupported block. The correct syntax is an object argument: `cpu = { ... }`.
 
-3. **cloud-init regenerated `/etc/hosts`.**  
+3. **cloud-init regenerated `/etc/hosts`.**
    The initial user-data set `manage_etc_hosts: true`. The active file was rebuilt during reboot, removing `k8s-api.lab`. Existing nodes were fixed by updating `/etc/cloud/templates/hosts.debian.tmpl`; the Terraform template was changed to `manage_etc_hosts: false` for future builds.
 
-4. **kubeadm does not copy custom kube-vip manifests.**  
+4. **kubeadm does not copy custom kube-vip manifests.**
    After a new control-plane node joined, the kube-vip Ansible role had to run on that node.
 
-5. **The kube-vip playbook initially targeted only `eph-cp01`.**  
+5. **The kube-vip playbook initially targeted only `eph-cp01`.**
    It was corrected to target the `control_plane` group and use `--limit` for one-node-at-a-time deployment.
 
-6. **`--list-hosts` does not execute a playbook.**  
+6. **`--list-hosts` does not execute an Ansible playbook.**
    It validates host selection only.
 
-7. **Join tokens and certificate keys are secrets.**  
+7. **Join tokens and certificate keys are secrets.**
    Exposed credentials were revoked and replaced. No real join credential belongs in this repository.
 
-8. **The Calico API server Pods run in `calico-system`.**  
+8. **The Calico API server Pods run in `calico-system`.**
    `calico-apiserver` is a component name, not the namespace used by this operator-managed installation.
+
+9. **Calico's Gateway API resource is not the standard Kubernetes Gateway API.**
+   `gatewayapis.operator.tigera.io` belongs to the Tigera Operator. The standard `gateway.networking.k8s.io` CRDs had to be installed separately.
+
+10. **Traefik chart v41 rejected the previous logging key.**
+    The values schema uses `log.level` and `accessLog.enabled`, not the older top-level `logs` configuration.
+
+11. **Local Helm rendering initially selected a removed PodDisruptionBudget API version.**
+    Supplying `--api-versions policy/v1/PodDisruptionBudget` produced the correct `policy/v1` resource during local validation. The live Helm installation detected the supported API automatically.
+
+12. **A ClusterIP Service normally has no external IP.**
+    The application Service remains internal. Traefik owns the MetalLB address and forwards requests to the ClusterIP Service.
+
+13. **`showmount` does not mount an NFS export.**
+    It only lists exports available from the server. A client must mount the export before its files become visible.
+
+14. **The same-looking path on two Linux machines is not automatically shared.**
+    `/data_all/havenbridge-nfs` exists on `syrus`. Kubernetes nodes access it through an NFS mount, not through a matching local directory.
+
+15. **A StorageClass can create PersistentVolumes dynamically.**
+    A manual PV was not required. The PVC requested the `havenbridge-nfs` StorageClass, and the NFS CSI provisioner created the PV automatically.
+
+16. **A container hostname normally identifies the Pod, not the Kubernetes node.**
+    The writer Pod used the Downward API field `spec.nodeName` to record that it was running on `eph-worker01`.
+
+17. **Persistent application data must be separated from the Pod lifecycle.**
+    The writer Pod was deleted, but its PVC remained. A new Pod on another worker mounted the same volume and retrieved the original data.
+
+---
+
+## Current Availability Boundaries
+
+The project currently provides redundancy across:
+
+* Three Kubernetes control-plane nodes.
+* Three etcd members.
+* kube-vip static Pods on all control-plane nodes.
+* MetalLB speaker Pods on all Kubernetes nodes.
+* Two Traefik replicas on separate worker nodes.
+* Application Pods that can be recreated or rescheduled.
+
+The NFS server remains a single point of failure because it runs on the physical host `syrus`.
+
+If `syrus` is unavailable:
+
+* The virtual machines are unavailable because they run on that host.
+* The NFS export is unavailable.
+* NFS-backed application storage cannot be mounted.
+
+The current NFS design was selected because it is simple, resource-efficient, easy to understand, and supports `ReadWriteMany` in the homelab.
+
+A production implementation could replace it with:
+
+* Longhorn
+* Rook-Ceph
+* A managed cloud block-storage service
+* A managed cloud file-storage service
+* A dedicated highly available NFS platform
 
 ---
 
@@ -481,15 +769,17 @@ Use placeholders in documentation:
 
 Recommended application controls:
 
-- Synthetic data only.
-- Namespace isolation.
-- Kubernetes RBAC.
-- NetworkPolicies.
-- Secrets mounted only where required.
-- TLS for user-facing endpoints.
-- PostgreSQL authentication and least privilege.
-- Audit-friendly application timestamps.
-- Backups and tested recovery procedures.
+* Synthetic data only.
+* Namespace isolation.
+* Kubernetes RBAC.
+* NetworkPolicies.
+* Secrets mounted only where required.
+* TLS for user-facing endpoints.
+* PostgreSQL authentication and least privilege.
+* Audit-friendly application timestamps.
+* Backups and tested recovery procedures.
+
+The NFS export currently uses homelab-oriented permissions to support dynamic provisioning. The directory should not be left world-writable with `0777`, and the use of `no_root_squash` must be treated as a deliberate lab simplification rather than a production recommendation.
 
 ---
 
@@ -500,10 +790,10 @@ From the repository root:
 ```bash
 git status --short
 git diff --check
-git add README.md terraform/libvirt/README.md ansible/README.md
+git add README.md
 git diff --cached --check
 git diff --cached --stat
-git commit -m "Document HA Kubernetes platform build and troubleshooting"
+git commit -m "Document platform routing and persistent storage"
 git push origin main
 ```
 
@@ -520,13 +810,55 @@ git diff --cached | grep -Ei \
 
 ## Next Recommended Work
 
-1. Label both worker nodes.
-2. Run scheduling, DNS and Pod-network smoke tests.
-3. Perform a controlled kube-vip failover test.
-4. Document etcd backup and restore.
-5. Create the `kubernetes/` directory structure.
-6. Deploy an ingress controller and persistent storage.
-7. Build the first FastAPI/PostgreSQL inquiry workflow using synthetic data.
-8. Add Prometheus, Grafana and Alertmanager after the application is running.
+1. Save the storage validation manifests and evidence in the repository.
+2. Clean up the temporary writer and reader Pods when the evidence has been recorded.
+3. Create the HavenBridge application namespace.
+4. Define application ConfigMaps and Secrets.
+5. Deploy PostgreSQL with an NFS-backed PersistentVolumeClaim.
+6. Validate PostgreSQL data persistence.
+7. Build and deploy the FastAPI backend.
+8. Build and deploy the web frontend.
+9. Replace the nginx validation route with HavenBridge application routes.
+10. Add the notification worker.
+11. Add NetworkPolicies and application-specific RBAC.
+12. Configure TLS.
+13. Add Prometheus, Grafana and Alertmanager.
+14. Return to the deferred kube-vip, worker-loss, control-plane-loss, and etcd-quorum tests.
 
-The project remains focused on one outcome: a reliable platform that can host and operate the HavenBridge Community Services Service Inquiry and Referral Tracking Platform.
+---
+
+## Planned Project Presentation Documents
+
+At the completion of the project, supporting presentation and interview material will be created, including:
+
+* Architecture overview.
+* Implementation summary.
+* Technology decision record.
+* Troubleshooting and lessons-learned document.
+* Project presentation talking points.
+* Likely technical questions and model answers.
+* Explanation of why each major technology was selected.
+* Five-minute project presentation script.
+* Fifteen-minute technical walkthrough.
+* Resume-ready project description.
+
+Topics will include:
+
+* Why Terraform was used.
+* Why Ansible was used.
+* Why three control-plane nodes were selected.
+* Why kube-vip was required.
+* Why Calico was selected.
+* Why MetalLB was needed.
+* Why Traefik and Gateway API were used.
+* Why backend Services remain ClusterIP.
+* Why a StorageClass was required.
+* Why NFS was selected for the homelab.
+* How dynamic PV provisioning works.
+* How PVC data survives Pod deletion.
+* The current availability limitations.
+* How the design would change in production.
+
+---
+
+The project remains focused on one outcome: building a reliable, explainable, and portfolio-ready platform capable of hosting and operating the HavenBridge Service Inquiry and Referral Tracking Platform.

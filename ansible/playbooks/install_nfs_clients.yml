@@ -1,0 +1,19 @@
+---
+# Install the Linux NFS client utilities required by the
+# Kubernetes NFS CSI node plugin.
+#
+# The play targets both control-plane and worker nodes because
+# Kubernetes workloads or infrastructure Pods may run on either.
+
+- name: Install NFS client utilities
+  hosts: "control_plane:workers"
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Install nfs-common
+      ansible.builtin.apt:
+        name: nfs-common
+        state: present
+        update_cache: true
+        cache_valid_time: 3600

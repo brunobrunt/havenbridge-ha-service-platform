@@ -1,0 +1,8 @@
+---
+# Layer 2 MetalLB configuration.
+speaker:
+  frr:
+    enabled: false
+
+frrk8s:
+  enabled: false

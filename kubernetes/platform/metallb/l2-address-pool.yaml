@@ -1,0 +1,19 @@
+---
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: havenbridge-application-pool
+  namespace: metallb-system
+spec:
+  addresses:
+    - 172.16.10.40-172.16.10.40
+
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: havenbridge-l2-advertisement
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+    - havenbridge-application-pool

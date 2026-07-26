@@ -1,0 +1,52 @@
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+
+metadata:
+  name: nfs-persistence-test
+  namespace: platform-validation
+
+spec:
+  accessModes:
+    - ReadWriteMany
+
+  storageClassName: havenbridge-nfs
+
+  resources:
+    requests:
+      storage: 1Gi
+
+---
+apiVersion: v1
+kind: Pod
+
+metadata:
+  name: nfs-writer
+  namespace: platform-validation
+
+spec:
+  # Start the test on worker01.
+  nodeSelector:
+    kubernetes.io/hostname: eph-worker01
+
+  containers:
+    - name: writer
+      image: busybox:1.36.1
+
+      command:
+        - /bin/sh
+        - -c
+        - |
+          echo "Written by nfs-writer on $(hostname) at $(date)" \
+            > /data/persistence-proof.txt
+
+          sleep 3600
+
+      volumeMounts:
+        - name: shared-storage
+          mountPath: /data
+
+  volumes:
+    - name: shared-storage
+      persistentVolumeClaim:
+        claimName: nfs-persistence-test

@@ -1,0 +1,43 @@
+---
+# Default persistent storage for the HavenBridge homelab.
+#
+# Each PVC receives its own uniquely named directory under:
+#
+#   /data_all/havenbridge-nfs
+#
+# The NFS server is the physical host, syrus.
+
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+
+metadata:
+  name: havenbridge-nfs
+
+  annotations:
+    # PVCs that omit storageClassName will use this class.
+    storageclass.kubernetes.io/is-default-class: "true"
+
+provisioner: nfs.csi.k8s.io
+
+parameters:
+  server: 172.16.10.1
+  share: /data_all/havenbridge-nfs
+
+  # Produce a readable but unique directory name for every PV.
+  subDir: ${pvc.metadata.namespace}-${pvc.metadata.name}-${pv.metadata.name}
+
+  # Restrict the volume directory to its owner and group.
+  # This is safer than 0777.
+  mountPermissions: "0770"
+
+  # Preserve the NFS directory if the CSI volume is deleted.
+  onDelete: retain
+
+# Preserve the PV and underlying data after PVC deletion.
+reclaimPolicy: Retain
+
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+
+mountOptions:
+  - nfsvers=4.1

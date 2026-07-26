@@ -1,0 +1,98 @@
+---
+# Traefik Gateway configuration for HavenBridge.
+#
+# MetalLB exposes the Traefik Service through:
+#
+#   172.16.10.40
+#
+# The Gateway API provider is used instead of the older
+# Kubernetes Ingress provider.
+
+deployment:
+  # Run two Traefik replicas for availability.
+  replicas: 2
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Prevent both Traefik Pods from being scheduled on the same node.
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: traefik
+        topologyKey: kubernetes.io/hostname
+
+# This project uses Gateway API exclusively.
+providers:
+  kubernetesCRD:
+    enabled: false
+
+  kubernetesIngress:
+    enabled: false
+
+  kubernetesGateway:
+    enabled: true
+    experimentalChannel: false
+
+# Do not create or use a Kubernetes IngressClass.
+ingressClass:
+  enabled: false
+
+# Let the Helm chart create the GatewayClass and Gateway.
+gatewayClass:
+  enabled: true
+  name: traefik
+
+gateway:
+  enabled: true
+  name: havenbridge-gateway
+  namespace: traefik
+
+  listeners:
+    web:
+      port: 8000
+      hostname: havenbridge.lab
+      protocol: HTTP
+
+      # Permit HTTPRoutes from application namespaces.
+      namespacePolicy:
+        from: All
+
+# Expose Traefik using MetalLB.
+service:
+  annotations:
+    metallb.io/address-pool: havenbridge-application-pool
+    metallb.io/loadBalancerIPs: "172.16.10.40"
+
+  spec:
+    type: LoadBalancer
+    externalTrafficPolicy: Cluster
+
+ports:
+  web:
+    port: 8000
+    exposedPort: 80
+    protocol: TCP
+    expose:
+      default: true
+
+  websecure:
+    port: 8443
+    exposedPort: 443
+    protocol: TCP
+    expose:
+      default: true
+
+# Do not expose the Traefik dashboard publicly.
+api:
+  dashboard: false
+  insecure: false
+# General Traefik application logs.
+log:
+  level: INFO
+# Record requests handled by Traefik.
+accessLog:
+  enabled: true

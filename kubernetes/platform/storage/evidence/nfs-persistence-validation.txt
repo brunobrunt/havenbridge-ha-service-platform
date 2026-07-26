@@ -1,0 +1,21 @@
+HavenBridge NFS Persistence Validation
+Validation date: 2026-07-26T12:55:58-06:00
+
+=== StorageClass ===
+NAME                        PROVISIONER      RECLAIMPOLICY   VOLUMEBINDINGMODE   ALLOWVOLUMEEXPANSION   AGE
+havenbridge-nfs (default)   nfs.csi.k8s.io   Retain          Immediate           true                   61m
+
+=== PersistentVolumeClaim ===
+NAME                   STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS      VOLUMEATTRIBUTESCLASS   AGE   VOLUMEMODE
+nfs-persistence-test   Bound    pvc-4a55c51f-195b-4814-b66b-d1268908af91   1Gi        RWX            havenbridge-nfs   <unset>                 57m   Filesystem
+
+=== PersistentVolume ===
+NAME                                       STATUS   CAPACITY   ACCESS          STORAGECLASS      CLAIM-NAMESPACE       CLAIM-NAME
+pvc-4a55c51f-195b-4814-b66b-d1268908af91   Bound    1Gi        ReadWriteMany   havenbridge-nfs   platform-validation   nfs-persistence-test
+
+=== Reader Pod Placement ===
+NAME         READY   STATUS    RESTARTS   AGE   IP               NODE           NOMINATED NODE   READINESS GATES
+nfs-reader   1/1     Running   0          35m   10.244.176.212   eph-worker02   <none>           <none>
+
+=== Persisted File ===
+Written by Pod nfs-writer on node eph-worker01 at Sun Jul 26 18:45:47 UTC 2026
