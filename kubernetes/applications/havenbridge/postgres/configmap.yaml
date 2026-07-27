@@ -1,0 +1,23 @@
+---
+apiVersion: v1
+kind: ConfigMap
+
+metadata:
+  name: havenbridge-postgres-config
+  namespace: havenbridge
+
+  labels:
+    app.kubernetes.io/name: postgresql
+    app.kubernetes.io/instance: havenbridge-postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: havenbridge
+
+data:
+  # Initial database created by the official PostgreSQL image.
+  POSTGRES_DB: havenbridge
+
+  # Administrative bootstrap account.
+  #
+  # The future backend application must not use this superuser.
+  # We will create a separate least-privilege application account.
+  POSTGRES_USER: havenbridge_admin

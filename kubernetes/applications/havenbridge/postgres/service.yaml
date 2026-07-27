@@ -1,0 +1,58 @@
+---
+# Headless Service used by the StatefulSet for stable Pod identity.
+
+apiVersion: v1
+kind: Service
+
+metadata:
+  name: havenbridge-postgres-headless
+  namespace: havenbridge
+
+  labels:
+    app.kubernetes.io/name: postgresql
+    app.kubernetes.io/instance: havenbridge-postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: havenbridge
+
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+
+  selector:
+    app.kubernetes.io/name: postgresql
+    app.kubernetes.io/instance: havenbridge-postgres
+
+  ports:
+    - name: postgresql
+      port: 5432
+      targetPort: postgresql
+      protocol: TCP
+
+---
+# Internal ClusterIP Service used by the HavenBridge backend.
+
+apiVersion: v1
+kind: Service
+
+metadata:
+  name: havenbridge-postgres
+  namespace: havenbridge
+
+  labels:
+    app.kubernetes.io/name: postgresql
+    app.kubernetes.io/instance: havenbridge-postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: havenbridge
+
+spec:
+  type: ClusterIP
+
+  selector:
+    app.kubernetes.io/name: postgresql
+    app.kubernetes.io/instance: havenbridge-postgres
+
+  ports:
+    - name: postgresql
+      port: 5432
+      targetPort: postgresql
+      protocol: TCP
