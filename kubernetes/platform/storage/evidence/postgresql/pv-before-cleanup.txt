@@ -1,0 +1,5 @@
+NAME                                   STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS      VOLUMEATTRIBUTESCLASS   AGE   VOLUMEMODE
+postgres-data-havenbridge-postgres-0   Bound    pvc-ff29106d-5d97-424f-b6b3-2432df3a176e   10Gi       RWO            havenbridge-nfs   <unset>                 16h   Filesystem
+
+NAME                                       CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM                                              STORAGECLASS      VOLUMEATTRIBUTESCLASS   REASON   AGE
+pvc-ff29106d-5d97-424f-b6b3-2432df3a176e   10Gi       RWO            Retain           Bound    havenbridge/postgres-data-havenbridge-postgres-0   havenbridge-nfs   <unset>                          16h
