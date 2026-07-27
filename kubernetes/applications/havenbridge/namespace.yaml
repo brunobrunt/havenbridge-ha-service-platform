@@ -1,0 +1,16 @@
+---
+apiVersion: v1
+kind: Namespace
+
+metadata:
+  name: havenbridge
+
+  labels:
+    app.kubernetes.io/part-of: havenbridge-platform
+
+    # Enforce Kubernetes' baseline Pod Security controls.
+    pod-security.kubernetes.io/enforce: baseline
+
+    # Report resources that do not yet satisfy the stricter profile.
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
