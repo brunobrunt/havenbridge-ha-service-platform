@@ -15,7 +15,11 @@
 *.tfstate.*
 .terraform.tfstate.lock.info
 
+# Ignore real environment files containing local secrets.
+.env
 
+# Keep safe environment templates in Git.
+!.env.example
 # ============================================================
 # Terraform plan files
 # ============================================================
@@ -23,6 +27,20 @@
 # terraform plan -out=project.tfplan
 *.tfplan
 *.plan
+
+# ============================================================
+# Local Python virtual environments.
+# Dependencies are recreated from requirements.txt and must not be committed.
+# ============================================================
+.venv/
+venv/
+
+# ============================================================
+# # Python-generated cache and compiled bytecode.
+# ============================================================
+__pycache__/
+*.py[cod]
+*$py.class
 
 
 # ============================================================
@@ -78,6 +96,9 @@ id_dsa
 # Environment-variable and secret files
 .env
 .env.*
+
+# Keep safe environment-variable templates in Git.
+!.env.example
 *.secret
 secrets.yaml
 secrets.yml

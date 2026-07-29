@@ -1,0 +1,852 @@
+# HAVENBRIDGE API LOCAL DEVELOPMENT AND TROUBLESHOOTING RUNBOOK
+
+Project root:
+
+/home/alabi/projects/havenbridge-ha-service-platform
+
+Backend directory:
+
+/home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api
+
+## PURPOSE
+
+This runbook documents the commands used to start, test, and troubleshoot the
+HavenBridge FastAPI backend during local development.
+
+The FastAPI application runs locally on the host named syrus.
+
+PostgreSQL runs inside the HavenBridge Kubernetes cluster.
+
+Connection flow:
+
+HavenBridge FastAPI on syrus
+|
+v
+127.0.0.1:15432
+|
+v
+SSH tunnel through eph-cp01
+|
+v
+Kubernetes PostgreSQL Service
+|
+v
+havenbridge-postgres-0
+
+============================================================
+
+1. CHANGE TO THE PROJECT ROOT
+   ============================================================
+
+Run:
+
+cd /home/alabi/projects/havenbridge-ha-service-platform
+
+Confirm:
+
+pwd
+
+Expected:
+
+/home/alabi/projects/havenbridge-ha-service-platform
+
+============================================================
+2. CHECK THE POSTGRESQL SERVICE
+===============================
+
+Confirm that the PostgreSQL Pod is running:
+
+ssh 
+-i /home/alabi/.ssh/eph_k8s 
+mino@172.16.10.31 
+"kubectl get pods 
+-n havenbridge 
+-l app=havenbridge-postgres 
+-o wide"
+
+Confirm the PostgreSQL Service:
+
+ssh 
+-i /home/alabi/.ssh/eph_k8s 
+mino@172.16.10.31 
+"kubectl get service havenbridge-postgres 
+-n havenbridge 
+-o wide"
+
+Retrieve the current PostgreSQL Service ClusterIP:
+
+POSTGRES_CLUSTER_IP="$(
+ssh 
+-i /home/alabi/.ssh/eph_k8s 
+mino@172.16.10.31 
+"kubectl get service havenbridge-postgres 
+-n havenbridge 
+-o jsonpath='{.spec.clusterIP}'"
+)"
+
+echo "PostgreSQL Service IP: ${POSTGRES_CLUSTER_IP}"
+
+Example output:
+
+PostgreSQL Service IP: 10.102.178.240
+
+============================================================
+3. CHECK WHETHER LOCAL PORT 15432 IS ALREADY IN USE
+===================================================
+
+Run:
+
+sudo ss -ltnp | grep ':15432'
+
+Alternative:
+
+sudo lsof 
+-iTCP:15432 
+-sTCP:LISTEN
+
+Check for an existing SSH tunnel:
+
+ps -ef | grep '[s]sh.*15432'
+
+If an SSH process is already forwarding:
+
+15432:10.102.178.240:5432
+
+do not start another tunnel.
+
+============================================================
+4. START THE POSTGRESQL SSH TUNNEL
+==================================
+
+Retrieve the current PostgreSQL Service ClusterIP:
+
+POSTGRES_CLUSTER_IP="$(
+ssh 
+-i /home/alabi/.ssh/eph_k8s 
+mino@172.16.10.31 
+"kubectl get service havenbridge-postgres 
+-n havenbridge 
+-o jsonpath='{.spec.clusterIP}'"
+)"
+
+Start the tunnel in the foreground:
+
+ssh 
+-N 
+-o ExitOnForwardFailure=yes 
+-o ServerAliveInterval=60 
+-o ServerAliveCountMax=3 
+-i /home/alabi/.ssh/eph_k8s 
+-L "15432:${POSTGRES_CLUSTER_IP}:5432" 
+mino@172.16.10.31
+
+The terminal remains occupied while the tunnel is active.
+
+This is normal.
+
+To stop the foreground tunnel, press:
+
+Ctrl+C
+
+## START THE TUNNEL IN THE BACKGROUND
+
+Run:
+
+ssh 
+-fN 
+-o ExitOnForwardFailure=yes 
+-o ServerAliveInterval=60 
+-o ServerAliveCountMax=3 
+-i /home/alabi/.ssh/eph_k8s 
+-L "15432:${POSTGRES_CLUSTER_IP}:5432" 
+mino@172.16.10.31
+
+Confirm:
+
+ps -ef | grep '[s]sh.*15432'
+
+Stop the background tunnel:
+
+pkill -f 'ssh.*15432:.*:5432'
+
+## COMMON TUNNEL ERROR
+
+Error:
+
+bind [127.0.0.1]:15432: Address already in use
+
+Meaning:
+
+Another program or an existing SSH tunnel is already listening on port 15432.
+
+Investigate with:
+
+sudo ss -ltnp | grep ':15432'
+
+ps -ef | grep '[s]sh.*15432'
+
+============================================================
+5. VERIFY THE LOCAL SSH TUNNEL
+==============================
+
+Run:
+
+sudo ss -ltnp | grep ':15432'
+
+Expected:
+
+An ssh process should be listening on:
+
+127.0.0.1:15432
+
+============================================================
+6. ACTIVATE THE PYTHON VIRTUAL ENVIRONMENT
+==========================================
+
+Change to the backend directory:
+
+cd 
+/home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api
+
+Activate the virtual environment:
+
+source 
+/home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/.venv/bin/activate
+
+Confirm the Python executable:
+
+which python
+
+Expected:
+
+/home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/.venv/bin/python
+
+============================================================
+7. CHECK THE POSTGRESQL PASSWORD FILE
+=====================================
+
+Check that the password file exists:
+
+ls -l 
+/tmp/havenbridge-api-postgres-password
+
+The permissions should normally be:
+
+-rw-------
+
+## RECREATE THE PASSWORD FILE
+
+Do this only if the file is missing.
+
+Run:
+
+umask 077
+
+ssh 
+-i /home/alabi/.ssh/eph_k8s 
+mino@172.16.10.31 
+"kubectl get secret havenbridge-postgres-secret 
+-n havenbridge 
+-o jsonpath='{.data.POSTGRES_PASSWORD}'" |
+base64 --decode \
+
+> /tmp/havenbridge-api-postgres-password
+
+Set restrictive permissions:
+
+chmod 600 
+/tmp/havenbridge-api-postgres-password
+
+Do not use cat to display the password.
+
+============================================================
+8. CONFIRM THE DATABASE IS READY
+================================
+
+Run from:
+
+/home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api
+
+Command:
+
+python -c '
+from app.database import database_is_ready
+
+print(f"Database ready: {database_is_ready()}")
+'
+
+Expected:
+
+Database ready: True
+
+## COMMON DATABASE CONNECTION ERROR
+
+Error:
+
+connection to server at "127.0.0.1", port 15432 failed:
+Connection refused
+
+Meaning:
+
+The SSH tunnel is not running, stopped unexpectedly, or is listening on a
+different local port.
+
+Check:
+
+sudo ss -ltnp | grep ':15432'
+
+ps -ef | grep '[s]sh.*15432'
+
+Restart the tunnel before starting Uvicorn.
+
+============================================================
+9. CHECK PYTHON SYNTAX
+======================
+
+Run from the project root:
+
+cd /home/alabi/projects/havenbridge-ha-service-platform
+
+Run:
+
+/home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/.venv/bin/python 
+-m compileall 
+applications/havenbridge-api/app
+
+Successful output should not contain SyntaxError or compilation failures.
+
+============================================================
+10. DISPLAY REGISTERED SQLALCHEMY TABLES
+========================================
+
+Run from the backend directory:
+
+cd 
+/home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api
+
+source .venv/bin/activate
+
+python -c '
+from app import models
+from app.database import Base
+
+print("Registered tables:")
+
+for table_name in Base.metadata.tables:
+print("-", table_name)
+'
+
+Expected:
+
+Registered tables:
+
+* service_inquiries
+
+============================================================
+11. DISPLAY REGISTERED FASTAPI ROUTES
+=====================================
+
+Run:
+
+python -c '
+from app.main import app
+
+openapi_schema = app.openapi()
+
+for path, operations in openapi_schema["paths"].items():
+methods = ", ".join(
+method.upper()
+for method in operations
+)
+
+```
+print(f"{methods:10} {path}")
+```
+
+'
+
+Expected:
+
+GET        /health/live
+GET        /health/ready
+POST, GET  /api/v1/inquiries
+GET        /
+
+OpenAPI is an API-description standard.
+
+OpenAPI is not OpenAI.
+
+============================================================
+12. START UVICORN
+=================
+
+The SSH tunnel must be running before Uvicorn starts.
+
+Change to the backend directory:
+
+cd 
+/home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api
+
+Activate the virtual environment:
+
+source .venv/bin/activate
+
+Start Uvicorn:
+
+python -m uvicorn app.main:app 
+--reload 
+--host 127.0.0.1 
+--port 8000
+
+Expected startup messages include:
+
+Uvicorn running on http://127.0.0.1:8000
+Starting HavenBridge API in development mode.
+Creating missing HavenBridge database tables.
+Application startup complete.
+
+## PYCHARM CONFIGURATION
+
+Name:
+
+HavenBridge API
+
+Module:
+
+uvicorn
+
+Parameters:
+
+app.main:app --reload --host 127.0.0.1 --port 8000
+
+Working directory:
+
+/home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api
+
+Python interpreter:
+
+/home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/.venv/bin/python
+
+============================================================
+13. TEST THE HEALTH ENDPOINTS
+=============================
+
+Liveness test:
+
+command curl -q -sS 
+-w '\nHTTP status: %{http_code}\n' 
+http://127.0.0.1:8000/health/live
+
+Expected:
+
+{"status":"healthy"}
+HTTP status: 200
+
+Readiness test:
+
+command curl -q -sS 
+-w '\nHTTP status: %{http_code}\n' 
+http://127.0.0.1:8000/health/ready
+
+Expected:
+
+{"status":"ready"}
+HTTP status: 200
+
+============================================================
+14. CONFIRM FASTAPI CREATED THE DATABASE TABLE
+==============================================
+
+Run:
+
+ssh 
+-i /home/alabi/.ssh/eph_k8s 
+mino@172.16.10.31 
+"kubectl exec 
+-n havenbridge 
+havenbridge-postgres-0 
+-c postgresql 
+-- psql 
+-U havenbridge_admin 
+-d havenbridge 
+-c '\d service_inquiries'"
+
+Expected columns include:
+
+id
+requester_name
+requester_email
+service_category
+message
+status
+created_at
+updated_at
+
+## SHORT TABLE EXISTENCE CHECK
+
+Run:
+
+ssh 
+-i /home/alabi/.ssh/eph_k8s 
+mino@172.16.10.31 
+"kubectl exec 
+-n havenbridge 
+havenbridge-postgres-0 
+-c postgresql 
+-- psql 
+-U havenbridge_admin 
+-d havenbridge 
+-tAc "SELECT to_regclass('public.service_inquiries');""
+
+Expected:
+
+service_inquiries
+
+## COMMON TABLE ERROR
+
+Error:
+
+relation "service_inquiries" does not exist
+
+Meaning:
+
+The FastAPI SQLAlchemy model exists, but the corresponding PostgreSQL table
+has not yet been created.
+
+Confirm that:
+
+1. app/models.py defines ServiceInquiry.
+2. app/main.py imports app.models.
+3. app/main.py runs Base.metadata.create_all().
+4. DB_AUTO_CREATE_TABLES=true is configured.
+5. The SSH tunnel is active when FastAPI starts.
+
+============================================================
+15. TEST POST /api/v1/inquiries
+===============================
+
+Use synthetic development data only.
+
+Run:
+
+command curl -q -sS 
+-X POST 
+-H 'Content-Type: application/json' 
+-d '{
+"requester_name": "Jordan Demo",
+"requester_email": "[jordan.demo@example.org](mailto:jordan.demo@example.org)",
+"service_category": "Respite care",
+"message": "I am requesting information about available respite care services."
+}' 
+-w '\nHTTP status: %{http_code}\n' 
+http://127.0.0.1:8000/api/v1/inquiries
+
+Expected HTTP status:
+
+HTTP status: 201
+
+============================================================
+16. TEST GET /api/v1/inquiries
+==============================
+
+Run:
+
+command curl -q -sS 
+http://127.0.0.1:8000/api/v1/inquiries |
+python3 -m json.tool
+
+============================================================
+17. CONFIRM INQUIRIES DIRECTLY IN POSTGRESQL
+============================================
+
+Run:
+
+ssh 
+-i /home/alabi/.ssh/eph_k8s 
+mino@172.16.10.31 
+"kubectl exec 
+-n havenbridge 
+havenbridge-postgres-0 
+-c postgresql 
+-- psql 
+-U havenbridge_admin 
+-d havenbridge 
+-c 'SELECT id, requester_name, requester_email, service_category, status, created_at FROM service_inquiries ORDER BY id;'"
+
+============================================================
+18. CHECK GIT STATUS
+====================
+
+Run from the project root:
+
+cd /home/alabi/projects/havenbridge-ha-service-platform
+
+Run:
+
+git status --short
+
+Display the current branch:
+
+git branch --show-current
+
+Display configured remotes:
+
+git remote -v
+
+============================================================
+19. CONFIRM .env AND .venv ARE IGNORED
+======================================
+
+Check the local environment file:
+
+git check-ignore -v 
+applications/havenbridge-api/.env
+
+Check a file inside the virtual environment:
+
+git check-ignore -v 
+applications/havenbridge-api/.venv/bin/python
+
+Expected ignore rules should include:
+
+.env
+.venv/
+
+## RECOMMENDED .gitignore RULES
+
+.env
+.venv/
+venv/
+
+============================================================
+20. FIND EMPTY PROJECT FILES
+============================
+
+Do not scan the virtual environment.
+
+Run:
+
+find 
+applications/havenbridge-api 
+kubernetes/applications/havenbridge/backend 
+-path '*/.venv' -prune -o 
+-type f 
+-size 0 
+-print |
+sort
+
+The following empty Python files are intentional:
+
+applications/havenbridge-api/app/**init**.py
+applications/havenbridge-api/app/routers/**init**.py
+
+They identify Python packages.
+
+Empty Docker, test, README, and Kubernetes manifest files should normally be
+populated before being committed.
+
+============================================================
+21. CHECK FOR GIT WHITESPACE ERRORS
+===================================
+
+Run:
+
+git diff --check
+
+No output means Git found no whitespace errors.
+
+============================================================
+22. LIST STAGED FILES
+=====================
+
+Run:
+
+git diff --cached --name-only
+
+Review the complete staged changes:
+
+git diff --cached
+
+============================================================
+23. CHECK WHETHER .env OR .venv IS STAGED
+=========================================
+
+Safe check that does not close the terminal:
+
+if git diff --cached --name-only |
+grep -qE '(^|/).env$|(^|/).venv/'; then
+echo "ERROR: Secret or virtual-environment content is staged."
+else
+echo "PASS: No .env or .venv files are staged."
+fi
+
+## DISPLAY THE MATCHING STAGED PATHS
+
+Run:
+
+git diff --cached --name-only |
+grep -E '(^|/).env$|(^|/).venv/'
+
+## IMPORTANT
+
+Do not use "exit 1" in an interactive terminal safety check unless intentionally
+exiting the current shell.
+
+This command can close an interactive terminal:
+
+exit 1
+
+============================================================
+24. CHECK WHETHER .env OR .venv IS ALREADY TRACKED
+==================================================
+
+Run:
+
+git ls-files |
+grep -E '(^|/).env$|(^|/).venv/'
+
+============================================================
+25. UNSTAGE .env AND .venv WITHOUT DELETING THEM
+================================================
+
+Unstage the local environment file:
+
+git restore --staged 
+applications/havenbridge-api/.env 2>/dev/null || true
+
+Unstage the virtual environment:
+
+git restore --staged 
+applications/havenbridge-api/.venv 2>/dev/null || true
+
+============================================================
+26. REMOVE .env OR .venv FROM THE GIT INDEX
+===========================================
+
+Use these commands only if Git is already tracking the files.
+
+The local files will remain on the computer.
+
+Remove .venv from the Git index:
+
+git rm -r --cached --ignore-unmatch 
+applications/havenbridge-api/.venv
+
+Remove .env from the Git index:
+
+git rm --cached --ignore-unmatch 
+applications/havenbridge-api/.env
+
+============================================================
+27. STAGE COMPLETED BACKEND FILES
+=================================
+
+Run:
+
+git add 
+.gitignore 
+applications/havenbridge-api/.env.example 
+applications/havenbridge-api/requirements.txt 
+applications/havenbridge-api/app/**init**.py 
+applications/havenbridge-api/app/config.py 
+applications/havenbridge-api/app/database.py 
+applications/havenbridge-api/app/main.py 
+applications/havenbridge-api/app/models.py 
+applications/havenbridge-api/app/schemas.py 
+applications/havenbridge-api/app/routers/**init**.py 
+applications/havenbridge-api/app/routers/health.py 
+applications/havenbridge-api/app/routers/inquiries.py 
+docs/runbooks/havenbridge-api-local-troubleshooting.txt
+
+Avoid broad commands such as:
+
+git add applications/
+
+A broad command could stage incomplete or unintended files.
+
+============================================================
+28. VERIFY THE STAGED FILES AGAIN
+=================================
+
+Run:
+
+git status --short
+
+Run:
+
+git diff --cached --name-only
+
+Run the secret safety check:
+
+if git diff --cached --name-only |
+grep -qE '(^|/).env$|(^|/).venv/'; then
+echo "ERROR: Secret or virtual-environment content is staged."
+else
+echo "PASS: No .env or .venv files are staged."
+fi
+
+============================================================
+29. COMMIT THE CHANGES
+======================
+
+Run:
+
+git commit 
+-m "feat: add HavenBridge FastAPI backend foundation"
+
+============================================================
+30. PUSH THE CHANGES
+====================
+
+Run:
+
+git push
+
+If the branch does not yet have an upstream:
+
+git push 
+--set-upstream origin 
+"$(git branch --show-current)"
+
+============================================================
+31. CONFIRM THE COMMIT AND WORKTREE
+===================================
+
+Display the latest commit:
+
+git log -1 --oneline
+
+Display remaining changes:
+
+git status --short
+
+============================================================
+RECOMMENDED LOCAL STARTUP ORDER
+===============================
+
+1. Confirm the Kubernetes PostgreSQL Pod and Service.
+2. Start the SSH tunnel.
+3. Confirm that port 15432 is listening.
+4. Activate the Python virtual environment.
+5. Confirm "Database ready: True".
+6. Start Uvicorn or PyCharm.
+7. Confirm the health endpoints.
+8. Confirm the service_inquiries table.
+9. Test POST /api/v1/inquiries.
+10. Test GET /api/v1/inquiries.
+11. Confirm the row directly in PostgreSQL.
+
+============================================================
+SECURITY NOTES
+==============
+
+Never commit:
+
+applications/havenbridge-api/.env
+applications/havenbridge-api/.venv/
+/tmp/havenbridge-api-postgres-password
+Kubernetes Secret values
+Real client, patient, caregiver, or family information
+
+Use only synthetic data during local development and testing.
+

@@ -1,0 +1,23 @@
+# FastAPI provides the web framework used to build HavenBridge API endpoints,
+# request validation, response validation, and automatic API documentation.
+fastapi==0.139.2
+
+# Uvicorn is the ASGI server that runs the FastAPI application inside
+# the development environment and the Kubernetes container.
+uvicorn[standard]==0.51.0
+
+# SQLAlchemy provides database models, PostgreSQL queries, connection pooling,
+# and controlled database sessions without placing raw SQL throughout the app.
+SQLAlchemy==2.0.51
+
+# Psycopg is the PostgreSQL driver used by SQLAlchemy to communicate with
+# the HavenBridge PostgreSQL Service. The binary package simplifies installation.
+psycopg[binary]==3.3.4
+
+# Pydantic Settings loads and validates application configuration from
+# environment variables, local development files, and Kubernetes-mounted secrets.
+pydantic-settings==2.14.2
+
+# Email Validator supports Pydantic's EmailStr type so inquiry email
+# addresses are checked before data reaches PostgreSQL.
+email-validator==2.3.0
