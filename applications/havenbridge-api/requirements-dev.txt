@@ -1,0 +1,8 @@
+# Install the production dependencies first.
+-r requirements.txt
+
+# FastAPI TestClient uses HTTPX to make in-process test requests.
+httpx==0.28.1
+
+# Pytest discovers and executes the HavenBridge automated tests.
+pytest==9.1.1

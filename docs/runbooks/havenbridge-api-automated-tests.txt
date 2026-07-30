@@ -1,0 +1,488 @@
+HAVENBRIDGE API AUTOMATED TESTING RUNBOOK
+==========================================
+
+Project root:
+/home/alabi/projects/havenbridge-ha-service-platform
+
+Backend directory:
+/home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api
+
+PURPOSE
+-------
+
+Automated tests check that important HavenBridge API behaviour still works after
+code changes.
+
+This document explains why automated tests were added to the HavenBridge API,
+what each testing file does, and how to run the tests.
+
+The main purpose of automated testing is simple:
+
+After changing the HavenBridge API, one command checks that important API
+features still behave correctly.
+
+Without automated tests, every API endpoint would need to be tested manually
+with Uvicorn, curl, the SSH tunnel, and PostgreSQL after every code change.
+
+With automated tests, Pytest performs the checks automatically.
+
+
+WHAT WAS TESTED
+---------------
+
+The current automated test suite checks six behaviours:
+
+1. GET /health/live returns HTTP 200 and reports healthy.
+2. GET /health/ready returns HTTP 200 when the database is available.
+3. GET /health/ready returns HTTP 503 when the database is unavailable.
+4. POST /api/v1/inquiries accepts a valid inquiry and returns HTTP 201.
+5. POST /api/v1/inquiries rejects an invalid email address with HTTP 422.
+6. GET /api/v1/inquiries returns previously created test inquiries.
+
+
+IMPORTANT TESTING DESIGN
+------------------------
+
+The automated tests do not use the real Kubernetes PostgreSQL database.
+
+Normal application flow:
+
+FastAPI
+    |
+    v
+SQLAlchemy
+    |
+    v
+SSH tunnel
+    |
+    v
+Kubernetes PostgreSQL
+
+Automated test flow:
+
+Pytest
+    |
+    v
+FastAPI TestClient
+    |
+    v
+FakeDatabaseSession
+
+The fake database exists only while the tests run. It does not change or store
+data in the real HavenBridge PostgreSQL database.
+
+Because the tests use a fake database, the following are not required:
+
+- The PostgreSQL SSH tunnel
+- Uvicorn
+- PyCharm's HavenBridge API run configuration
+- A live Kubernetes PostgreSQL connection
+
+
+Current test coverage:
+
+1. GET /health/live returns HTTP 200.
+2. GET /health/ready returns HTTP 200 when the database is available.
+3. GET /health/ready returns HTTP 503 when the database is unavailable.
+4. POST /api/v1/inquiries accepts valid data and returns HTTP 201.
+5. POST /api/v1/inquiries rejects an invalid email with HTTP 422.
+6. GET /api/v1/inquiries returns a stored test inquiry.
+
+The tests use a fake database session. They do not write to the real Kubernetes
+PostgreSQL database.
+
+For these tests, you do not need:
+
+- The PostgreSQL SSH tunnel
+- Uvicorn
+- The PyCharm HavenBridge API run configuration
+- A live Kubernetes PostgreSQL connection
+
+
+STEP 1: DEVELOPMENT-ONLY REQUIREMENTS
+-------------------------------------
+
+File:
+/home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/requirements-dev.txt
+
+Purpose:
+
+requirements.txt contains packages required to run HavenBridge.
+requirements-dev.txt adds packages required only for development and testing.
+
+Important packages:
+
+pytest
+    Runs the automated tests.
+
+httpx
+    Allows FastAPI TestClient to send test HTTP requests directly to the app.
+
+Install the development packages:
+
+cd /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api
+
+source /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/.venv/bin/activate
+
+python -m pip install \
+  -r /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/requirements-dev.txt
+
+
+STEP 2: PYTEST CONFIGURATION
+----------------------------
+
+File:
+/home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/pytest.ini
+
+Purpose:
+
+This file tells Pytest:
+
+- Search for tests inside the tests directory.
+- Recognize files beginning with test_.
+- Recognize functions beginning with test_.
+- Display useful pass, fail, and error information.
+
+This file is configuration only. It is not HavenBridge application logic.
+
+
+STEP 3: GITIGNORE RULES
+-----------------------
+
+File:
+/home/alabi/projects/havenbridge-ha-service-platform/.gitignore
+
+Purpose:
+
+Pytest creates temporary local files that should not be committed to Git.
+
+Recommended rules:
+
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+
+STEP 4: SHARED TEST FIXTURES
+----------------------------
+
+File:
+/home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/tests/conftest.py
+
+Purpose:
+
+This file prepares reusable tools for the tests.
+
+FakeDatabaseSession
+    Acts like a small temporary database during a test.
+
+TestClient
+    Sends requests directly to FastAPI without starting Uvicorn.
+
+The production database dependency is replaced with the fake session.
+
+Normal application flow:
+
+FastAPI -> SQLAlchemy -> SSH tunnel -> Kubernetes PostgreSQL
+
+Automated test flow:
+
+Pytest -> TestClient -> FastAPI -> FakeDatabaseSession
+
+The TestClient is not used as a context manager because the context-manager form
+would run the FastAPI lifespan. The current lifespan runs
+Base.metadata.create_all(), which tries to connect to PostgreSQL.
+
+
+STEP 5: TEST PACKAGE FILE
+-------------------------
+
+File:
+/home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/tests/__init__.py
+
+Purpose:
+
+This file identifies the tests directory as a Python package. It contains no
+business logic.
+
+
+STEP 6: HEALTH TESTS
+--------------------
+
+File:
+/home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/tests/test_health.py
+
+The file contains three tests.
+
+Test 1: Liveness
+
+Request:
+GET /health/live
+
+Expected:
+HTTP 200
+{"status": "healthy"}
+
+Meaning:
+The FastAPI process can receive and answer a request.
+
+Test 2: Readiness when the database is available
+
+The test temporarily makes database_is_ready() return True.
+
+Expected:
+HTTP 200
+{"status": "ready"}
+
+Test 3: Readiness when the database is unavailable
+
+The test temporarily makes database_is_ready() return False.
+
+Expected:
+HTTP 503
+
+Meaning:
+HavenBridge correctly reports that it is not ready when a required dependency
+is unavailable.
+
+Run only the health tests:
+
+cd /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api
+
+source /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/.venv/bin/activate
+
+python -m pytest \
+  /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/tests/test_health.py \
+  -v
+
+Expected summary:
+3 passed
+
+
+STEP 7: INQUIRY TESTS
+---------------------
+
+File:
+/home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/tests/test_inquiries.py
+
+The file contains three tests.
+
+Test 1: Create a valid inquiry
+
+Request:
+POST /api/v1/inquiries
+
+Expected:
+HTTP 201
+
+The response includes a generated ID, status, and timestamps.
+
+Test 2: Reject an invalid email address
+
+Expected:
+HTTP 422
+
+Meaning:
+Pydantic rejects invalid input before the route writes to the database.
+
+Test 3: List stored test inquiries
+
+Process:
+
+1. Create a test inquiry with POST /api/v1/inquiries.
+2. Request GET /api/v1/inquiries.
+3. Confirm the created inquiry appears in the returned list.
+
+Run only the inquiry tests:
+
+cd /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api
+
+source /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/.venv/bin/activate
+
+python -m pytest \
+  /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/tests/test_inquiries.py \
+  -v
+
+Expected summary:
+3 passed
+
+
+STEP 8: CHECK PYTHON SYNTAX
+---------------------------
+
+Run:
+
+cd /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api
+
+source /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/.venv/bin/activate
+
+python -m compileall \
+  /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/tests
+
+Purpose:
+
+compileall checks for Python syntax errors such as missing parentheses,
+incorrect indentation, or invalid syntax.
+
+It does not run the tests.
+
+
+STEP 9: RUN THE COMPLETE TEST SUITE
+-----------------------------------
+
+Run:
+
+cd /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api
+
+source /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/.venv/bin/activate
+
+python -m pytest -v
+
+Expected summary:
+6 passed
+
+Meaning:
+
+- Three health tests passed.
+- Three inquiry tests passed.
+
+
+UNDERSTANDING THE OUTPUT
+------------------------
+
+Example:
+
+tests/test_inquiries.py::test_create_inquiry_returns_created_record PASSED
+
+Meaning:
+
+tests/test_inquiries.py
+    The file containing the test.
+
+test_create_inquiry_returns_created_record
+    The specific test function.
+
+PASSED
+    The actual result matched the expected result.
+
+
+ABOUT THE WARNING
+-----------------
+
+The current test output includes a Starlette TestClient deprecation warning.
+
+The warning does not mean the tests failed.
+
+PASSED
+    Test succeeded.
+
+WARNING
+    A dependency should be updated later.
+
+FAILED or ERROR
+    Test did not succeed.
+
+The warning does not block the Dockerization phase.
+
+
+WHY THIS MATTERS TO HAVENBRIDGE
+-------------------------------
+
+The tests provide a repeatable safety check before:
+
+- Building a Docker image
+- Deploying to Kubernetes
+- Adding CI/CD
+- Changing API routes
+- Changing request validation
+- Changing database code
+
+Later, the CI/CD pipeline can run:
+
+python -m pytest -v
+
+If a test fails, the pipeline can stop before deploying a broken container.
+
+
+SIMPLE SUMMARY
+--------------
+
+requirements-dev.txt
+    Installs test tools.
+
+pytest.ini
+    Tells Pytest where the tests are.
+
+tests/conftest.py
+    Creates the fake test environment.
+
+tests/test_health.py
+    Checks liveness and readiness.
+
+tests/test_inquiries.py
+    Checks inquiry creation, validation, and listing.
+
+python -m compileall tests
+    Checks Python syntax.
+
+python -m pytest -v
+    Runs all automated tests.
+
+
+GIT COMMANDS FOR THIS PHASE
+---------------------------
+
+Run from the project root:
+
+cd /home/alabi/projects/havenbridge-ha-service-platform
+
+Stage the test files and this runbook:
+
+git add \
+  /home/alabi/projects/havenbridge-ha-service-platform/.gitignore \
+  /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/pytest.ini \
+  /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/requirements-dev.txt \
+  /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/tests/__init__.py \
+  /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/tests/conftest.py \
+  /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/tests/test_health.py \
+  /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/tests/test_inquiries.py \
+  /home/alabi/projects/havenbridge-ha-service-platform/docs/runbooks/havenbridge-api-automated-tests.txt
+
+Review staged paths:
+
+git diff --cached --name-only
+
+Check for generated Python files:
+
+git diff --cached --name-only |
+grep -E '__pycache__|\.pyc$'
+
+No output is expected.
+
+Check whitespace:
+
+git diff --check
+
+No output is expected.
+
+Commit:
+
+git commit \
+  -m "test: add automated HavenBridge API tests"
+
+Push:
+
+git push
+
+
+NEXT PHASE
+----------
+
+Phase 5B.2 - Dockerize the HavenBridge backend
+
+Files to populate:
+
+/home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/Dockerfile
+
+/home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/.dockerignore
