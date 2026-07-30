@@ -1,0 +1,614 @@
+HavenBridge API Container and PostgreSQL Validation Runbook
+=============================================================
+
+Document purpose
+----------------
+This runbook records the steps used on July 30, 2026 to:
+
+1. Validate the HavenBridge API Docker image.
+2. Confirm that the image runs as a non-root user.
+3. Connect the local Docker container on Syrus to PostgreSQL in Kubernetes.
+4. troubleshoot database connectivity and authentication problems.
+5. Confirm that the API created its PostgreSQL tables successfully.
+
+Environment
+-----------
+Syrus workstation:
+  Host: Syrus
+  Project root:
+    /home/alabi/projects/havenbridge-ha-service-platform
+
+HavenBridge API directory:
+  /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api
+
+Docker image:
+  havenbridge-api:0.1.0
+
+Kubernetes control-plane:
+  Host: eph-cp01
+  IP: 172.16.10.31
+  SSH user: mino
+  SSH private key:
+    /home/alabi/.ssh/eph_k8s
+
+Kubernetes namespace:
+  havenbridge
+
+PostgreSQL pod:
+  havenbridge-postgres-0
+
+PostgreSQL Secret:
+  havenbridge-postgres-secret
+
+PostgreSQL Secret key:
+  POSTGRES_PASSWORD
+
+PostgreSQL username:
+  havenbridge_admin
+
+PostgreSQL database:
+  havenbridge
+
+
+1. Confirm the Docker image exists
+----------------------------------
+Run on Syrus:
+
+  cd /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api
+
+  docker image ls
+
+Expected image:
+
+  havenbridge-api:0.1.0
+
+
+2. Confirm that the image uses a non-root user
+----------------------------------------------
+Run on Syrus:
+
+  docker run \
+    --rm \
+    --entrypoint id \
+    havenbridge-api:0.1.0
+
+Expected result:
+
+  uid=100(havenbridge) gid=101(havenbridge) groups=101(havenbridge)
+
+This confirms that the application image does not run as root.
+
+
+3. First API container start
+----------------------------
+Run on Syrus:
+
+  docker run \
+    --detach \
+    --name havenbridge-api-test \
+    --publish 8000:8000 \
+    havenbridge-api:0.1.0
+
+Check the container:
+
+  docker ps --all --filter name=havenbridge-api-test
+
+Check the application logs:
+
+  docker logs havenbridge-api-test
+
+The first startup failed with:
+
+  ValueError: Set POSTGRES_PASSWORD or POSTGRES_PASSWORD_FILE.
+
+Meaning:
+The FastAPI application starts by connecting to PostgreSQL and creating any
+missing tables. PostgreSQL credentials therefore must be supplied to the
+container at runtime.
+
+
+4. Confirm the PostgreSQL username and database
+-----------------------------------------------
+Syrus does not have kubectl configured, so run Kubernetes commands remotely
+through eph-cp01.
+
+Run on Syrus:
+
+  ssh -i /home/alabi/.ssh/eph_k8s \
+    mino@172.16.10.31 \
+    'kubectl exec \
+      --namespace havenbridge \
+      havenbridge-postgres-0 \
+      -- sh -c '\''printf "POSTGRES_USER=%s\nPOSTGRES_DB=%s\n" "$POSTGRES_USER" "$POSTGRES_DB"'\'''
+
+Confirmed values:
+
+  POSTGRES_USER=havenbridge_admin
+  POSTGRES_DB=havenbridge
+
+
+5. Confirm how PostgreSQL receives its password
+-----------------------------------------------
+Connect to eph-cp01:
+
+  ssh -i /home/alabi/.ssh/eph_k8s \
+    mino@172.16.10.31
+
+Run on eph-cp01:
+
+  kubectl get pod \
+    havenbridge-postgres-0 \
+    --namespace havenbridge \
+    --output jsonpath='{range .spec.containers[?(@.name=="postgresql")].volumeMounts[*]}{.name}{" -> "}{.mountPath}{"\n"}{end}'
+
+Confirmed password volume mount:
+
+  postgres-secret -> /run/secrets
+
+Identify the Kubernetes Secret used by that volume:
+
+  kubectl get pod \
+    havenbridge-postgres-0 \
+    --namespace havenbridge \
+    --output jsonpath='{.spec.volumes[?(@.name=="postgres-secret")].secret.secretName}{"\n"}'
+
+Confirmed Secret:
+
+  havenbridge-postgres-secret
+
+List the Secret keys without exposing their values:
+
+  kubectl get secret \
+    havenbridge-postgres-secret \
+    --namespace havenbridge \
+    --output go-template='{{range $key, $value := .data}}{{printf "%s\n" $key}}{{end}}'
+
+Confirmed Secret key:
+
+  POSTGRES_PASSWORD
+
+
+6. Display the PostgreSQL password only when necessary
+------------------------------------------------------
+SECURITY WARNING:
+This command prints the plaintext password. Do not paste the password into Git,
+documentation, screenshots, tickets, or chat messages.
+
+Run on eph-cp01:
+
+  kubectl get secret \
+    havenbridge-postgres-secret \
+    --namespace havenbridge \
+    --output jsonpath='{.data.POSTGRES_PASSWORD}' \
+    | base64 --decode
+
+  echo
+
+Kubernetes Secret values are Base64-encoded. Base64 is encoding, not encryption.
+
+
+7. Create the local runtime-secret directory
+--------------------------------------------
+Return to Syrus before creating this directory:
+
+  exit
+
+Confirm the current host:
+
+  hostname
+
+Run on Syrus:
+
+  mkdir -p \
+    /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/.runtime-secrets
+
+  chmod 700 \
+    /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/.runtime-secrets
+
+
+8. Copy the PostgreSQL password securely to Syrus
+-------------------------------------------------
+The preferred method is to retrieve the Secret directly through SSH instead of
+manually copying and pasting the password.
+
+Run on Syrus:
+
+  ssh -i /home/alabi/.ssh/eph_k8s \
+    mino@172.16.10.31 \
+    "kubectl get secret havenbridge-postgres-secret \
+      --namespace havenbridge \
+      --output jsonpath='{.data.POSTGRES_PASSWORD}'" \
+    | base64 --decode \
+    | sudo tee \
+      /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/.runtime-secrets/postgres-password \
+    > /dev/null
+
+Set ownership so the non-root container user can read the file:
+
+  sudo chown 100:101 \
+    /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/.runtime-secrets/postgres-password
+
+Set restrictive permissions:
+
+  sudo chmod 0400 \
+    /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/.runtime-secrets/postgres-password
+
+Confirm that the file exists and is not empty without displaying it:
+
+  sudo test -s \
+    /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/.runtime-secrets/postgres-password \
+    && echo "PostgreSQL password file exists and is not empty."
+
+
+9. Prevent the local password from entering Git
+-----------------------------------------------
+Edit:
+
+  /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/.gitignore
+
+Open the file:
+
+  vim \
+    /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/.gitignore
+
+Add:
+
+  # Local runtime secrets
+  .runtime-secrets/
+
+Verify:
+
+  git -C /home/alabi/projects/havenbridge-ha-service-platform \
+    check-ignore \
+    applications/havenbridge-api/.runtime-secrets/postgres-password
+
+
+10. Open the SSH and kubectl database tunnel
+--------------------------------------------
+The API container runs on Syrus, while PostgreSQL runs inside Kubernetes.
+The temporary connection path is:
+
+  HavenBridge API container
+          |
+          v
+  host.docker.internal:15432
+          |
+          v
+  Syrus Docker bridge address 172.17.0.1:15432
+          |
+          v
+  SSH tunnel
+          |
+          v
+  eph-cp01 loopback port 15433
+          |
+          v
+  kubectl port-forward
+          |
+          v
+  havenbridge-postgres-0:5432
+
+Open a separate Syrus terminal and run:
+
+  ssh -i /home/alabi/.ssh/eph_k8s \
+    -g \
+    -L 172.17.0.1:15432:127.0.0.1:15433 \
+    mino@172.16.10.31 \
+    "kubectl port-forward \
+      --namespace havenbridge \
+      pod/havenbridge-postgres-0 \
+      15433:5432"
+
+Leave this terminal running.
+
+Why port 15433 is used on eph-cp01:
+Port 15432 was already occupied by an earlier kubectl port-forward process.
+Any unused remote loopback port can be used as long as the SSH forwarding
+destination and kubectl port-forward listening port match.
+
+Verify the Syrus listener in another terminal:
+
+  sudo ss -ltnp | grep 15432
+
+Expected listener:
+
+  172.17.0.1:15432
+
+
+11. Start the API container with PostgreSQL settings
+----------------------------------------------------
+Remove a failed or old test container:
+
+  docker rm --force havenbridge-api-test 2>/dev/null || true
+
+Run the API container:
+
+  docker run \
+    --detach \
+    --name havenbridge-api-test \
+    --publish 8000:8000 \
+    --add-host host.docker.internal:host-gateway \
+    --env POSTGRES_HOST=host.docker.internal \
+    --env POSTGRES_PORT=15432 \
+    --env POSTGRES_USER=havenbridge_admin \
+    --env POSTGRES_DB=havenbridge \
+    --env POSTGRES_PASSWORD_FILE=/run/secrets/postgres-password \
+    --mount type=bind,source=/home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/.runtime-secrets/postgres-password,target=/run/secrets/postgres-password,readonly \
+    havenbridge-api:0.1.0
+
+The password is mounted as a read-only file instead of being passed as a
+plaintext environment variable.
+
+
+12. Validate application startup
+--------------------------------
+Run on Syrus:
+
+  docker logs havenbridge-api-test
+
+Successful output:
+
+  INFO:     Started server process [1]
+  INFO:     Waiting for application startup.
+  Starting HavenBridge API in development mode.
+  Creating missing HavenBridge database tables.
+  INFO:     Application startup complete.
+  INFO:     Uvicorn running on http://0.0.0.0:8000
+
+Confirm the container is running:
+
+  docker ps --filter name=havenbridge-api-test
+
+Confirm the container still runs as the non-root user:
+
+  docker exec havenbridge-api-test id
+
+Expected:
+
+  uid=100(havenbridge) gid=101(havenbridge) groups=101(havenbridge)
+
+
+13. Test the API endpoints
+--------------------------
+Run on Syrus:
+
+  curl --include http://127.0.0.1:8000/
+
+  curl --include http://127.0.0.1:8000/health
+
+Check Swagger documentation:
+
+  curl \
+    --silent \
+    --output /dev/null \
+    --write-out 'Swagger HTTP status: %{http_code}\n' \
+    http://127.0.0.1:8000/docs
+
+Expected:
+
+  Swagger HTTP status: 200
+
+Browser URL:
+
+  http://127.0.0.1:8000/docs
+
+
+14. Confirm PostgreSQL accepts the Kubernetes Secret
+----------------------------------------------------
+This test proves the Secret password, username, database, and PostgreSQL server
+configuration are all correct.
+
+Run on Syrus:
+
+  ssh -i /home/alabi/.ssh/eph_k8s \
+    mino@172.16.10.31 \
+    'kubectl exec \
+      --namespace havenbridge \
+      havenbridge-postgres-0 \
+      --container postgresql \
+      -- sh -c '\''PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")" \
+      psql \
+      --host 127.0.0.1 \
+      --username "$POSTGRES_USER" \
+      --dbname "$POSTGRES_DB" \
+      --command "SELECT current_user, current_database();"'\'''
+
+Confirmed result:
+
+  current_user       | current_database
+  -------------------+-----------------
+  havenbridge_admin  | havenbridge
+
+
+15. Confirm that the API created the database tables
+----------------------------------------------------
+Run on Syrus:
+
+  ssh -i /home/alabi/.ssh/eph_k8s \
+    mino@172.16.10.31 \
+    'kubectl exec \
+      --namespace havenbridge \
+      havenbridge-postgres-0 \
+      --container postgresql \
+      -- sh -c '\''PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")" \
+      psql \
+      --host 127.0.0.1 \
+      --username "$POSTGRES_USER" \
+      --dbname "$POSTGRES_DB" \
+      --command "\dt"'\'''
+
+Confirmed tables:
+
+  public | platform_validation | table | havenbridge_admin
+  public | service_inquiries   | table | havenbridge_admin
+
+This validates the complete path:
+
+  Docker image
+      |
+      v
+  FastAPI container
+      |
+      v
+  SSH and kubectl tunnel
+      |
+      v
+  PostgreSQL authentication
+      |
+      v
+  SQLAlchemy table creation
+      |
+      v
+  Tables confirmed in PostgreSQL
+
+
+16. Troubleshooting summary
+---------------------------
+
+Problem:
+  kubectl: command not found on Syrus
+
+Cause:
+  kubectl is configured on eph-cp01, not Syrus.
+
+Resolution:
+  Run Kubernetes commands remotely with:
+
+    ssh -i /home/alabi/.ssh/eph_k8s \
+      mino@172.16.10.31 \
+      "<kubectl command>"
+
+
+Problem:
+  No such file or directory for .runtime-secrets/postgres-password
+
+Cause:
+  The command was run on eph-cp01, or the directory did not exist on Syrus.
+
+Resolution:
+  Return to Syrus and run:
+
+    mkdir -p \
+      /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/.runtime-secrets
+
+
+Problem:
+  connection refused at 172.17.0.1:15432
+
+Cause:
+  The SSH tunnel was listening only on Syrus loopback address 127.0.0.1.
+  Docker accessed the host through 172.17.0.1.
+
+Resolution:
+  Bind the local SSH listener to 172.17.0.1 and use -g:
+
+    -g -L 172.17.0.1:15432:127.0.0.1:15433
+
+
+Problem:
+  unable to listen on port 15432 on eph-cp01
+
+Cause:
+  An existing kubectl port-forward process already used that port.
+
+Resolution:
+  Use another free eph-cp01 loopback port, such as 15433:
+
+    15433:5432
+
+
+Problem:
+  password authentication failed for user havenbridge_admin
+
+Cause:
+  The manually created password file on Syrus did not match the Kubernetes
+  Secret.
+
+Resolution:
+  Recreate the file directly from the Secret through SSH, then compare
+  checksums if necessary.
+
+Local checksum:
+
+  sudo sha256sum \
+    /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/.runtime-secrets/postgres-password
+
+Remote checksum:
+
+  ssh -i /home/alabi/.ssh/eph_k8s \
+    mino@172.16.10.31 \
+    "kubectl get secret havenbridge-postgres-secret \
+      --namespace havenbridge \
+      --output jsonpath='{.data.POSTGRES_PASSWORD}' \
+      | base64 --decode \
+      | sha256sum"
+
+The two checksum values must match.
+
+
+17. Cleanup
+-----------
+Stop and remove the test container:
+
+  docker stop havenbridge-api-test
+
+  docker rm havenbridge-api-test
+
+Stop the SSH and kubectl tunnel:
+Return to the terminal running the tunnel and press:
+
+  Ctrl+C
+
+
+18. Final validation status
+---------------------------
+Completed successfully on July 30, 2026:
+
+  [PASS] Docker image havenbridge-api:0.1.0 exists.
+  [PASS] Image runs as non-root user havenbridge.
+  [PASS] API starts successfully inside Docker.
+  [PASS] API reaches PostgreSQL in Kubernetes.
+  [PASS] PostgreSQL authenticates havenbridge_admin.
+  [PASS] SQLAlchemy creates missing application tables.
+  [PASS] platform_validation table exists.
+  [PASS] service_inquiries table exists.
+
+
+19. Recommended repository location
+-----------------------------------
+Store this file at:
+
+  /home/alabi/projects/havenbridge-ha-service-platform/kubernetes/platform/runbooks/havenbridge-api-postgresql-validation.txt
+
+
+20. Git commit commands
+-----------------------
+Run on Syrus after placing the file in the repository:
+
+  cd /home/alabi/projects/havenbridge-ha-service-platform
+
+Review the repository status:
+
+  git status --short
+
+Add only the runbook and the API .gitignore change:
+
+  git add \
+    /home/alabi/projects/havenbridge-ha-service-platform/kubernetes/platform/runbooks/havenbridge-api-postgresql-validation.txt \
+    /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/.gitignore
+
+Review the staged changes:
+
+  git diff --cached
+
+Commit:
+
+  git commit -m "docs: add API PostgreSQL validation runbook"
+
+Confirm the commit:
+
+  git log -1 --oneline
+
+Do not add this directory or password file:
+
+  /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/.runtime-secrets/
