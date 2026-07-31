@@ -41,6 +41,25 @@ The completed portfolio story is intended to be:
 
 ---
 
+## Current Project Status
+
+Phases 1–4 are complete.
+
+Phase 5 is in progress.
+
+Completed application-layer work:
+
+- PostgreSQL deployed as a Kubernetes StatefulSet
+- PostgreSQL persistence validated
+- FastAPI backend implemented with SQLAlchemy and Psycopg
+- Docker image `havenbridge-api:0.1.0` built successfully
+- Image confirmed to run as the non-root `havenbridge` user
+- Local Docker container connected successfully to PostgreSQL in Kubernetes
+- `platform_validation` and `service_inquiries` tables confirmed
+
+The next step is to publish the API image to a container registry and deploy it
+inside Kubernetes.
+
 ## Architecture
 
 ### Application access architecture
@@ -463,7 +482,30 @@ Remaining platform work:
 
 ### Phase 5 — Inquiry and Referral Tracking Application
 
-**Status: next phase**
+**Status: in progress**
+
+Completed:
+
+- [x] Deploy PostgreSQL
+- [x] Validate PostgreSQL persistence
+- [x] Implement the FastAPI backend
+- [x] Add SQLAlchemy and Psycopg connectivity
+- [x] Build `havenbridge-api:0.1.0`
+- [x] Confirm the image runs as a non-root user
+- [x] Validate the API container against PostgreSQL
+- [x] Confirm the application database tables
+
+Remaining:
+
+- [ ] Publish the API image
+- [ ] Deploy the API to Kubernetes
+- [ ] Create the API Service
+- [ ] Configure Kubernetes Secrets and ConfigMaps
+- [ ] Add readiness and liveness probes
+- [ ] Add resource requests and limits
+- [ ] Create the Gateway API route
+- [ ] Build the frontend
+- [ ] Add the notification worker
 
 Suggested application states:
 
@@ -739,6 +781,82 @@ A production implementation could replace it with:
 * A dedicated highly available NFS platform
 
 ---
+
+The HavenBridge platform provides redundancy between Kubernetes virtual
+machines:
+
+- Three control-plane virtual machines
+- Three stacked-etcd members
+- kube-vip on all control-plane nodes
+- MetalLB speakers across the Kubernetes nodes
+- Two Traefik replicas on separate worker virtual machines
+
+However, this is not yet physical-host high availability.
+
+The physical host `syrus` currently provides both:
+
+1. The KVM/libvirt environment hosting all Kubernetes virtual machines
+2. The NFS server providing persistent storage to the cluster
+
+### NFS service or export failure
+
+If `syrus` remains operational but the NFS service, export, disk mount or NFS
+network path fails:
+
+- The Kubernetes control plane may remain available
+- Stateless workloads may continue running
+- PostgreSQL and other NFS-backed workloads may become unavailable
+- Pods may report `FailedMount`, I/O or readiness errors
+- Existing PVCs and PVs should be preserved
+
+The recovery approach is to restore `/data_all`, the NFS service, the original
+export and the same NFS server address before restarting affected workloads.
+
+### Complete Syrus host failure
+
+If the physical `syrus` host fails:
+
+- All Kubernetes virtual machines stop
+- The Kubernetes API becomes unavailable
+- etcd quorum becomes unavailable
+- MetalLB and Traefik stop
+- PostgreSQL and application workloads stop
+- The NFS export becomes unavailable
+- The entire HavenBridge homelab platform becomes unavailable
+
+Although the cluster has three control-plane virtual machines, all three share
+the same physical failure domain.
+
+### Resilience approach
+
+Short-term improvements:
+
+- Protect `syrus` with a UPS
+- Monitor host availability, disk health, capacity and NFS availability
+- Create scheduled PostgreSQL logical backups with `pg_dump`
+- Create scheduled etcd snapshots
+- Copy backups to a separate physical device or remote host
+- Test backup restoration procedures
+
+Medium-term improvements:
+
+- Move NFS to a dedicated NAS or second Linux host
+- Replicate important storage data to a standby system
+- Document an active/passive recovery process
+- Keep backups independent of the primary NFS host
+
+Long-term improvements:
+
+- Run Kubernetes nodes across separate physical hosts
+- Use Longhorn, Rook-Ceph, highly available NFS or managed cloud storage
+- Place storage replicas in separate physical failure domains
+
+Running Longhorn or Rook-Ceph only inside virtual machines hosted by `syrus`
+would not protect the platform from a complete `syrus` failure.
+
+Detailed recovery procedures are documented in:
+
+- [NFS Storage Design and Recovery](kubernetes/platform/storage/README.md)
 
 ## Security and Privacy
 

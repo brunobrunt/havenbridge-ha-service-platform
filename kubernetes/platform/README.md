@@ -11,30 +11,8 @@ route, secure and persist the HavenBridge application.
 - Persistent storage for stateful workloads
 - TLS and certificate management
 
-## Network Addresses
-
-| Purpose | Address |
-|---|---|
-| Kubernetes API VIP | `172.16.10.30` |
-| Application Gateway IP | `172.16.10.40` |
-| Kubernetes API DNS | `k8s-api.lab` |
-| Application DNS | `havenbridge.lab` |
-
 The Kubernetes API VIP and application gateway address are intentionally
 separate.
-
-# HavenBridge Kubernetes Platform Services
-
-This directory contains Kubernetes platform components required to expose,
-route, secure and persist the HavenBridge application.
-
-## Components
-
-* MetalLB for bare-metal LoadBalancer services
-* Traefik Proxy for application traffic
-* Kubernetes Gateway API for routing
-* Persistent storage for stateful workloads
-* TLS and certificate management
 
 ## Network Addresses
 
@@ -189,4 +167,63 @@ Detailed command output and evidence are available at:
 ```text
 storage/evidence/postgres-persistence-validation.txt
 ```
+## Application Integration Status
+
+PostgreSQL is running in the `havenbridge` namespace as a StatefulSet with
+NFS-backed persistent storage.
+
+The HavenBridge FastAPI backend has been implemented and packaged as:
+
+```text
+havenbridge-api:0.1.0
+```
+
+The Docker image has been validated with the following checks:
+
+* The container starts successfully
+* The container runs as the non-root `havenbridge` user
+* The API connects successfully to PostgreSQL
+* SQLAlchemy creates the required application tables
+* The `platform_validation` table exists
+* The `service_inquiries` table exists
+
+During local validation, the FastAPI container ran on `syrus` while PostgreSQL
+ran inside Kubernetes.
+
+The temporary connection path was:
+
+```text
+FastAPI container on syrus
+        ↓
+SSH tunnel
+        ↓
+kubectl port-forward
+        ↓
+PostgreSQL Pod in Kubernetes
+```
+
+After the API is deployed inside Kubernetes, it will connect directly to the
+internal PostgreSQL Service. The SSH tunnel will no longer be required.
+
+## Platform Availability Note
+
+The Kubernetes control plane is redundant across three virtual machines.
+
+However, all Kubernetes virtual machines and the NFS server currently depend
+on the same physical host, `syrus`.
+
+An NFS-service failure may affect PostgreSQL and other NFS-backed workloads
+while the Kubernetes control plane remains available.
+
+A complete `syrus` host failure stops both the Kubernetes virtual machines and
+the NFS storage service.
+
+Detailed storage failure, recovery and resilience guidance is documented in:
+
+* [NFS Storage Design and Recovery](storage/README.md)
+
+## Operational Runbooks
+
+* [HavenBridge API and PostgreSQL Validation](runbooks/havenbridge-api-postgresql-validation.txt)
+* [NFS Storage Design and Recovery](storage/README.md)
 

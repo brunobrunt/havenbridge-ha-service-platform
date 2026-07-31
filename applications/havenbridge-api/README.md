@@ -498,4 +498,152 @@ Testing the POST endpoint before table creation can cause:
 ```text
 relation "service_inquiries" does not exist
 ```
+---
+
+## Docker Image Validation
+
+The HavenBridge API has been packaged and validated as the following Docker
+image:
+
+```text
+havenbridge-api:0.1.0
+```
+
+The image was built from:
+
+```text
+/home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/Dockerfile
+```
+
+### Non-root container validation
+
+The image was tested with:
+
+```bash
+docker run \
+  --rm \
+  --entrypoint id \
+  havenbridge-api:0.1.0
+```
+
+Validated result:
+
+```text
+uid=100(havenbridge) gid=101(havenbridge) groups=101(havenbridge)
+```
+
+This confirms the application runs as the dedicated non-root `havenbridge`
+user rather than as `root`.
+
+### Database configuration
+
+The API requires PostgreSQL credentials during startup because SQLAlchemy
+connects to PostgreSQL and creates any missing application tables.
+
+The validated database settings were:
+
+```text
+POSTGRES_HOST=host.docker.internal
+POSTGRES_PORT=15432
+POSTGRES_USER=havenbridge_admin
+POSTGRES_DB=havenbridge
+POSTGRES_PASSWORD_FILE=/run/secrets/postgres-password
+```
+
+The PostgreSQL password was mounted into the container as a read-only file.
+
+The password was not included in the Docker image, Dockerfile or Git
+repository.
+
+### Local container connection path
+
+During local Docker validation, the API ran on `syrus` while PostgreSQL ran
+inside Kubernetes.
+
+The temporary connection path was:
+
+```text
+HavenBridge API container
+        ↓
+host.docker.internal:15432
+        ↓
+Docker bridge: 172.17.0.1
+        ↓
+SSH tunnel
+        ↓
+kubectl port-forward on eph-cp01
+        ↓
+havenbridge-postgres-0:5432
+```
+
+This tunnel is required only while the API runs outside Kubernetes.
+
+After the API is deployed in the `havenbridge` namespace, it will connect
+directly to the internal PostgreSQL Kubernetes Service.
+
+### Successful container startup
+
+The validated container logs included:
+
+```text
+INFO:     Started server process [1]
+INFO:     Waiting for application startup.
+Starting HavenBridge API in development mode.
+Creating missing HavenBridge database tables.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000
+```
+
+This confirms that:
+
+* The Docker container started successfully
+* FastAPI completed its startup lifecycle
+* The PostgreSQL connection succeeded
+* SQLAlchemy created any missing tables
+* Uvicorn listened on all container network interfaces
+
+### Database tables confirmed
+
+The following tables were confirmed in PostgreSQL:
+
+```text
+public | platform_validation | table | havenbridge_admin
+public | service_inquiries   | table | havenbridge_admin
+```
+
+The `platform_validation` table was used to validate PostgreSQL persistence.
+
+The `service_inquiries` table is used by the HavenBridge API to store service
+inquiry submissions.
+
+### Validation status
+
+* [x] Docker image built successfully
+* [x] Image runs as a non-root user
+* [x] PostgreSQL password supplied through a read-only file
+* [x] Local container connected to PostgreSQL in Kubernetes
+* [x] FastAPI startup completed successfully
+* [x] SQLAlchemy created the required tables
+* [x] `platform_validation` table confirmed
+* [x] `service_inquiries` table confirmed
+* [x] Docker and PostgreSQL troubleshooting documented
+
+Detailed commands and troubleshooting steps are recorded in:
+
+```text
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/platform/runbooks/havenbridge-api-postgresql-validation.txt
+```
+
+## Next Application Step
+
+The next step is to:
+
+1. Publish `havenbridge-api:0.1.0` to a container registry
+2. Deploy the API as a Kubernetes Deployment
+3. Create an internal ClusterIP Service
+4. Configure PostgreSQL access through Kubernetes Secrets and ConfigMaps
+5. Add readiness and liveness probes
+6. Add CPU and memory requests and limits
+7. Validate direct in-cluster API-to-PostgreSQL communication
+8. Expose the API through Traefik and Gateway API
 
