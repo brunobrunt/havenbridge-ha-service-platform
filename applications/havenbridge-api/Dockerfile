@@ -1,6 +1,10 @@
 # Start with an official lightweight Python 3.12 image.
 FROM python:3.12-slim
 
+# Add OCI metadata for GitHub Container Registry.
+LABEL org.opencontainers.image.source="https://github.com/brunobrunt/havenbridge-ha-service-platform" \
+      org.opencontainers.image.description="FastAPI backend for the HavenBridge service inquiry and referral tracking platform"
+
 # Prevent Python from creating .pyc files and ensure logs appear immediately.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
