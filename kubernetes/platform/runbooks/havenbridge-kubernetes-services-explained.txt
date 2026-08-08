@@ -1,0 +1,702 @@
+
+text = """HavenBridge Kubernetes Services Explained — Building Analogy
+=============================================================
+
+Purpose
+-------
+
+This note explains the Kubernetes Services currently visible in the HavenBridge
+cluster.
+
+It starts with:
+
+"What is a Kubernetes Service?"
+
+Then it explains each Service in simple terms using the same office-building
+analogy used for NetworkPolicy.
+
+
+1. What Is a Kubernetes Service?
+--------------------------------
+
+A Kubernetes Service gives one or more Pods a stable network address.
+
+Pods are temporary.
+
+A Pod can restart, be deleted, move to another node, or receive a new Pod IP.
+
+Because Pod IP addresses can change, other applications should not normally
+depend directly on individual Pod IP addresses.
+
+A Service solves that problem.
+
+
+Without a Service
+-----------------
+
+Imagine an employee works in an office, but the employee keeps changing rooms.
+
+Today:
+
+Employee -> Room 101
+
+Tomorrow:
+
+Employee -> Room 206
+
+If everyone has to remember the employee's current room number, communication
+becomes difficult.
+
+That is similar to connecting directly to Pod IP addresses.
+
+
+With a Service
+--------------
+
+Instead of asking:
+
+"What room is this employee in today?"
+
+you call the company extension:
+
+Extension 5000
+
+The company phone system knows which room the employee currently occupies.
+
+That is what a Kubernetes Service does.
+
+A Service provides a stable name, virtual IP address, and port, then forwards
+traffic to the correct matching Pods.
+
+
+Simple Building Analogy
+-----------------------
+
+Pod
+= the employee or office where the application is actually running.
+
+Service
+= the permanent company extension or reception desk used to reach that
+  employee/application.
+
+Deployment or StatefulSet
+= the manager responsible for making sure the required employees/applications
+  exist.
+
+NetworkPolicy
+= the security rules controlling who may enter which office.
+
+MetalLB
+= the public street address that lets outside visitors find the building.
+
+Traefik
+= the receptionist who receives visitors and sends them to the correct office.
+
+
+2. Understanding the Service Columns
+------------------------------------
+
+NAMESPACE
+= the department or floor that owns the Service.
+
+NAME
+= the Service's Kubernetes name.
+
+TYPE
+= how the Service is exposed.
+
+CLUSTER-IP
+= the stable internal virtual IP used inside the cluster.
+
+EXTERNAL-IP
+= an address used by clients outside the cluster when applicable.
+
+PORT(S)
+= the network ports exposed by the Service.
+
+AGE
+= how long the Service has existed.
+
+
+3. ClusterIP Service
+--------------------
+
+A ClusterIP Service gets an internal virtual IP that is reachable inside the
+Kubernetes cluster.
+
+Building analogy:
+
+A ClusterIP is an internal company phone extension.
+
+Examples in HavenBridge include:
+
+- calico-api
+- calico-typha
+- kubernetes
+- havenbridge-api
+- havenbridge-postgres
+- kube-dns
+- metallb-webhook-service
+
+
+4. Headless Service
+-------------------
+
+A headless Service shows:
+
+CLUSTER-IP: None
+
+It does not provide one virtual Service IP.
+
+Instead, Kubernetes DNS can return the identity or address of the actual backing
+Pod or Pods.
+
+Building analogy:
+
+Normal Service:
+"Call the database department's main extension."
+
+Headless Service:
+"Give me the direct office identity of this specific database employee."
+
+
+5. LoadBalancer Service
+-----------------------
+
+A LoadBalancer Service is designed to make a Service reachable from outside the
+Kubernetes cluster.
+
+In HavenBridge:
+
+traefik
+
+has:
+
+TYPE:
+LoadBalancer
+
+CLUSTER-IP:
+10.97.19.4
+
+EXTERNAL-IP:
+172.16.10.40
+
+Building analogy:
+
+ClusterIP
+= internal company extension.
+
+LoadBalancer external IP
+= public street address or main external number.
+
+MetalLB provides the external address because HavenBridge is a bare-metal
+cluster.
+
+
+6. Service Ports
+----------------
+
+Ports are the network entry points exposed by the Service.
+
+Building analogy:
+
+The Service is the main department number.
+
+Ports are like different extensions or doors for different functions.
+
+
+=============================================================
+SERVICES CURRENTLY IN THE HAVENBRIDGE CLUSTER
+=============================================================
+
+
+7. calico-system / calico-api
+-----------------------------
+
+Type:
+ClusterIP
+
+Cluster IP:
+10.109.59.167
+
+Port:
+443/TCP
+
+What it does:
+
+This Service provides internal access to Calico API functionality.
+
+Calico provides Pod networking and enforces Kubernetes NetworkPolicy rules.
+
+Building analogy:
+
+Calico is the building's hallway-networking and internal-security department.
+
+calico-api is an internal secure service desk used by Calico-related components
+or management tools.
+
+
+8. calico-system / calico-kube-controllers-metrics
+---------------------------------------------------
+
+Type:
+ClusterIP
+
+Cluster IP:
+None
+
+Port:
+9094/TCP
+
+What it does:
+
+This headless Service exposes metrics from the Calico Kubernetes controllers.
+
+Monitoring tools can use these metrics.
+
+Building analogy:
+
+It is like a monitoring board in the security department showing operational
+statistics.
+
+
+9. calico-system / calico-typha
+-------------------------------
+
+Type:
+ClusterIP
+
+Cluster IP:
+10.101.54.108
+
+Port:
+5473/TCP
+
+What it does:
+
+Calico Typha helps scale communication between Calico networking components.
+
+Building analogy:
+
+Instead of every security guard calling headquarters individually, Typha acts
+like a regional supervisor that distributes updates efficiently.
+
+
+10. default / kubernetes
+------------------------
+
+Type:
+ClusterIP
+
+Cluster IP:
+10.96.0.1
+
+Port:
+443/TCP
+
+What it does:
+
+This built-in Service provides Pods with a stable way to reach the Kubernetes
+API server.
+
+Building analogy:
+
+The Kubernetes API server is the building's central administration office.
+
+The Service named "kubernetes" is the stable internal extension used to reach
+that office.
+
+
+11. havenbridge / havenbridge-api
+---------------------------------
+
+Type:
+ClusterIP
+
+Cluster IP:
+10.109.62.24
+
+Port:
+80/TCP
+
+What it does:
+
+This Service gives Traefik and other approved clients a stable way to reach the
+HavenBridge API Pods.
+
+Traffic flow:
+
+Traefik
+   |
+   v
+havenbridge-api Service:80
+   |
+   v
+HavenBridge API Pods:8000
+
+Building analogy:
+
+The API Pods are two employees doing the same job.
+
+The Service is the department's permanent extension.
+
+Traefik calls the extension instead of remembering each employee's room number.
+
+
+12. havenbridge / havenbridge-postgres
+--------------------------------------
+
+Type:
+ClusterIP
+
+Cluster IP:
+10.102.178.240
+
+Port:
+5432/TCP
+
+What it does:
+
+This Service gives the HavenBridge API a stable way to reach PostgreSQL.
+
+Traffic flow:
+
+HavenBridge API
+       |
+       v
+havenbridge-postgres Service:5432
+       |
+       v
+havenbridge-postgres-0:5432
+
+Building analogy:
+
+PostgreSQL is the protected records room.
+
+The API calls the database department's permanent extension rather than knowing
+the current Pod IP.
+
+
+13. havenbridge / havenbridge-postgres-headless
+-----------------------------------------------
+
+Type:
+ClusterIP
+
+Cluster IP:
+None
+
+Port:
+5432/TCP
+
+What it does:
+
+This headless Service supports stable DNS identity for the PostgreSQL
+StatefulSet Pod.
+
+The Pod has a predictable name:
+
+havenbridge-postgres-0
+
+Building analogy:
+
+The regular PostgreSQL Service says:
+
+"Call the database department."
+
+The headless Service says:
+
+"Give me the direct office identity of database employee number 0."
+
+
+14. kube-system / kube-dns
+--------------------------
+
+Type:
+ClusterIP
+
+Cluster IP:
+10.96.0.10
+
+Ports:
+53/UDP
+53/TCP
+9153/TCP
+
+What it does:
+
+This Service provides Kubernetes DNS.
+
+It lets Pods resolve names such as:
+
+havenbridge-postgres
+
+or:
+
+havenbridge-api.havenbridge.svc.cluster.local
+
+into Service IP addresses.
+
+Ports:
+
+UDP/53
+= normal DNS queries.
+
+TCP/53
+= DNS over TCP, including fallback.
+
+TCP/9153
+= CoreDNS metrics.
+
+Building analogy:
+
+kube-dns is the building's internal company directory.
+
+An employee asks:
+
+"Where is havenbridge-postgres?"
+
+The directory returns the correct address.
+
+
+15. metallb-system / metallb-webhook-service
+--------------------------------------------
+
+Type:
+ClusterIP
+
+Cluster IP:
+10.99.220.32
+
+Port:
+443/TCP
+
+What it does:
+
+This internal Service supports MetalLB admission-webhook functionality.
+
+It helps validate certain MetalLB-related Kubernetes configuration.
+
+Building analogy:
+
+MetalLB manages the building's external street address.
+
+The webhook Service is like an internal clerk who checks address-related
+requests before they are accepted.
+
+
+16. traefik / traefik
+---------------------
+
+Type:
+LoadBalancer
+
+Cluster IP:
+10.97.19.4
+
+External IP:
+172.16.10.40
+
+Ports:
+80:30894/TCP
+443:31700/TCP
+
+What it does:
+
+This is HavenBridge's main external application entry point.
+
+MetalLB makes 172.16.10.40 reachable from the local network.
+
+Traffic flow:
+
+External client
+      |
+      v
+havenbridge.lab
+      |
+      v
+172.16.10.40
+      |
+      v
+MetalLB
+      |
+      v
+Traefik LoadBalancer Service
+      |
+      v
+Traefik Pods
+      |
+      v
+HTTPRoute
+      |
+      v
+havenbridge-api Service
+      |
+      v
+HavenBridge API Pods
+
+Building analogy:
+
+MetalLB
+= makes the building's street address reachable.
+
+Traefik Service
+= the main public entrance.
+
+Traefik Pods
+= the receptionists.
+
+HTTPRoute
+= the receptionist's routing instructions.
+
+havenbridge-api Service
+= the internal extension for the API department.
+
+API Pods
+= the employees actually doing the work.
+
+
+17. ClusterIP vs LoadBalancer vs Headless
+-----------------------------------------
+
+ClusterIP
+= internal company extension.
+
+LoadBalancer
+= public/main building entrance.
+
+Headless Service
+= direct employee/office lookup instead of one shared virtual Service IP.
+
+
+18. How the Main HavenBridge Services Work Together
+---------------------------------------------------
+
+External client
+      |
+      v
+Traefik LoadBalancer Service
+172.16.10.40
+      |
+      v
+Traefik Pods
+      |
+      v
+havenbridge-api Service
+10.109.62.24:80
+      |
+      v
+HavenBridge API Pods
+      |
+      | DNS lookup through kube-dns
+      v
+kube-dns
+10.96.0.10
+      |
+      v
+havenbridge-postgres Service
+10.102.178.240:5432
+      |
+      v
+havenbridge-postgres-0
+
+
+19. Full Building Analogy
+-------------------------
+
+MetalLB
+= gives the building a reachable street address.
+
+Traefik LoadBalancer Service
+= the main public entrance.
+
+Traefik Pods
+= receptionists.
+
+HTTPRoute
+= receptionist instructions.
+
+ClusterIP Services
+= internal company phone extensions.
+
+Pods
+= employees or offices performing the actual work.
+
+Deployment
+= manager responsible for replaceable employees such as API Pods.
+
+StatefulSet
+= manager responsible for stateful employees such as PostgreSQL.
+
+Headless Service
+= direct office directory for specific StatefulSet Pods.
+
+kube-dns
+= internal company directory.
+
+Calico
+= hallway networking and internal security system.
+
+NetworkPolicy
+= access-control rules for internal doors.
+
+PostgreSQL
+= protected records room.
+
+Kubernetes API
+= central building administration office.
+
+
+20. Most Important Summary
+--------------------------
+
+A Kubernetes Service does not normally run the application itself.
+
+Pods run the application.
+
+Services provide a stable way to FIND and REACH those Pods.
+
+Remember:
+
+Pod
+= where the application runs.
+
+Service
+= stable address used to reach the application.
+
+ClusterIP
+= internal-only Service address.
+
+LoadBalancer
+= Service exposed outside the cluster.
+
+Headless Service
+= direct DNS identity for individual Pods instead of one virtual Service IP.
+
+For HavenBridge:
+
+External visitors
+        |
+        v
+MetalLB + Traefik LoadBalancer
+        |
+        v
+Traefik
+        |
+        v
+havenbridge-api Service
+        |
+        v
+API Pods
+        |
+        v
+havenbridge-postgres Service
+        |
+        v
+PostgreSQL Pod
+"""
+
+path = Path("/mnt/data/havenbridge-kubernetes-services-building-analogy.txt")
+path.write_text(text, encoding="utf-8")
+print(path)
+

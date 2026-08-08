@@ -1,0 +1,74 @@
+HavenBridge Platform Validation Namespace Cleanup — Validation Steps
+=================================================================
+
+Purpose
+-------
+Document and verify removal of the temporary platform-validation namespace
+after the real HavenBridge Traefik/Gateway/HTTPRoute path was validated.
+
+Evidence directory
+------------------
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/platform/evidence/platform-validation-cleanup/
+
+Existing before-state evidence
+------------------------------
+before-cleanup.txt
+before-cleanup.yaml
+
+1. Confirm the namespace before cleanup
+---------------------------------------
+ssh -i /home/alabi/.ssh/eph_k8s \
+  mino@172.16.10.31 \
+  'kubectl get namespace platform-validation'
+
+2. Delete the temporary namespace
+---------------------------------
+ssh -i /home/alabi/.ssh/eph_k8s \
+  mino@172.16.10.31 \
+  'kubectl delete namespace platform-validation'
+
+3. Wait for namespace deletion
+------------------------------
+ssh -i /home/alabi/.ssh/eph_k8s \
+  mino@172.16.10.31 \
+  'kubectl wait \
+    --for=delete \
+    namespace/platform-validation \
+    --timeout=120s'
+
+4. Capture after-cleanup evidence
+---------------------------------
+ssh -i /home/alabi/.ssh/eph_k8s \
+  mino@172.16.10.31 \
+  '
+  echo "=== Namespace Check ==="
+  kubectl get namespace platform-validation 2>&1 || true
+
+  echo
+  echo "=== Resource Check ==="
+  kubectl get all,httproute,configmap,secret \
+    --namespace platform-validation 2>&1 || true
+  ' | tee \
+  /home/alabi/projects/havenbridge-ha-service-platform/kubernetes/platform/evidence/platform-validation-cleanup/after-cleanup.txt
+
+Expected result
+---------------
+The namespace should return NotFound.
+
+Any resource query against platform-validation should also report that the
+namespace does not exist.
+
+5. Confirm HavenBridge still works
+----------------------------------
+curl -iv http://havenbridge.lab/health/ready
+
+Expected:
+HTTP/1.1 200 OK
+{"status":"ready"}
+
+6. Final validation result
+--------------------------
+PASS when:
+- platform-validation namespace no longer exists;
+- temporary nginx-validation resources are gone with the namespace;
+- HavenBridge external readiness still returns HTTP 200.

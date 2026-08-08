@@ -1,0 +1,9 @@
+NAME                       TYPE        CLUSTER-IP    EXTERNAL-IP   PORT(S)   AGE     SELECTOR
+service/nginx-validation   ClusterIP   10.105.76.7   <none>        80/TCP    7d23h   app=nginx-validation
+
+NAME                               READY   UP-TO-DATE   AVAILABLE   AGE     CONTAINERS   IMAGES         SELECTOR
+deployment.apps/nginx-validation   0/0     0            0           7d23h   nginx        nginx:stable   app=nginx-validation
+
+NAME                                          DESIRED   CURRENT   READY   AGE     CONTAINERS   IMAGES         SELECTOR
+replicaset.apps/nginx-validation-74d4c657b9   0         0         0       7d23h   nginx        nginx:stable   app=nginx-validation,pod-template-hash=74d4c657b9
+replicaset.apps/nginx-validation-7f9fc7d8d5   0         0         0       7d21h   nginx        nginx:stable   app=nginx-validation,pod-template-hash=7f9fc7d8d5

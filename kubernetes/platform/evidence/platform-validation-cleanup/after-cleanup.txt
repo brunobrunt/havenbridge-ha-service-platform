@@ -1,0 +1,5 @@
+=== Namespace Check ===
+Error from server (NotFound): namespaces "platform-validation" not found
+
+=== Resource Check ===
+No resources found in platform-validation namespace.
