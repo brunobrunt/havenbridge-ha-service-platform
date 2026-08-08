@@ -1,0 +1,170 @@
+HavenBridge PostgreSQL Ingress NetworkPolicy — Validation Results
+================================================================
+
+Validation date: 2026-08-07
+
+Purpose
+-------
+Confirm that PostgreSQL accepts TCP/5432 from the HavenBridge API and blocks an unrelated Pod.
+
+Policy manifest:
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/networkpolicy-postgres-ingress.yaml
+
+Validation steps:
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/evidence/networkpolicy-validation/postgres-ingress-validation-steps.txt
+
+Validation result destination:
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/evidence/networkpolicy-validation/postgres-ingress-validation.txt
+
+1. Applied Policy
+-----------------
+Name: allow-havenbridge-api-to-postgres
+Namespace: havenbridge
+
+Selected PostgreSQL Pods:
+app.kubernetes.io/instance=havenbridge-postgres
+app.kubernetes.io/name=postgresql
+
+Allowed source:
+Namespace: havenbridge
+Pod label: app.kubernetes.io/name=havenbridge-api
+
+Allowed port:
+TCP/5432
+
+Policy type:
+Ingress
+
+2. Positive Validation
+----------------------
+Command:
+
+curl -iv http://havenbridge.lab/health/ready
+
+Observed result:
+
+HTTP/1.1 200 OK
+
+Interpretation:
+
+The HavenBridge API remained healthy after PostgreSQL ingress isolation was enabled.
+Because the API depends on PostgreSQL, the HTTP 200 response is evidence that the approved API-to-PostgreSQL path remained functional.
+
+3. Unauthorized PostgreSQL Client
+---------------------------------
+Test Pod:
+postgres-unauthorized-client
+
+Namespace:
+default
+
+Target:
+havenbridge-postgres.havenbridge.svc.cluster.local:5432
+
+The test Pod did not match the approved source namespace or API Pod label.
+
+4. Test Pod Creation
+--------------------
+Command:
+
+ssh -i /home/alabi/.ssh/eph_k8s \
+  mino@172.16.10.31 \
+  'kubectl apply --filename=-' \
+  < /home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/evidence/networkpolicy-validation/postgres-unauthorized-client.yaml
+
+Observed:
+
+pod/postgres-unauthorized-client created
+
+5. Wait for Completion
+----------------------
+Command:
+
+ssh -i /home/alabi/.ssh/eph_k8s \
+  mino@172.16.10.31 \
+  'kubectl wait \
+    --namespace default \
+    --for=jsonpath="{.status.phase}"=Succeeded \
+    pod/postgres-unauthorized-client \
+    --timeout=90s'
+
+Observed:
+
+pod/postgres-unauthorized-client condition met
+
+6. Negative Test Result
+-----------------------
+Command:
+
+ssh -i /home/alabi/.ssh/eph_k8s \
+  mino@172.16.10.31 \
+  'kubectl logs postgres-unauthorized-client \
+    --namespace default'
+
+Observed:
+
+Testing unauthorized PostgreSQL access
+
+EXPECTED: PostgreSQL ingress NetworkPolicy blocked the connection.
+
+7. Validation Result
+--------------------
+PASS
+
+Confirmed:
+
+- PostgreSQL ingress isolation is active.
+- HavenBridge API traffic to PostgreSQL remains allowed.
+- External API readiness remains HTTP 200.
+- An unrelated Pod in the default namespace cannot connect to PostgreSQL.
+- TCP/5432 is protected by the PostgreSQL ingress NetworkPolicy.
+
+8. Cleanup
+----------
+Remove the temporary test Pod:
+
+ssh -i /home/alabi/.ssh/eph_k8s \
+  mino@172.16.10.31 \
+  'kubectl delete pod postgres-unauthorized-client \
+    --namespace default \
+    --ignore-not-found'
+
+9. Final Verification
+---------------------
+Check default namespace:
+
+ssh -i /home/alabi/.ssh/eph_k8s \
+  mino@172.16.10.31 \
+  'kubectl get pods --namespace default'
+
+Check HavenBridge workloads:
+
+ssh -i /home/alabi/.ssh/eph_k8s \
+  mino@172.16.10.31 \
+  'kubectl get pods --namespace havenbridge --output wide'
+
+Check external readiness:
+
+curl -iv http://havenbridge.lab/health/ready
+
+Expected:
+
+HTTP/1.1 200 OK
+
+10. Final NetworkPolicy State
+-----------------------------
+
+API ingress:
+Traefik -> HavenBridge API:8000 = allowed
+
+API egress:
+HavenBridge API -> CoreDNS UDP/53 = allowed
+HavenBridge API -> CoreDNS TCP/53 = allowed
+HavenBridge API -> PostgreSQL TCP/5432 = allowed
+Other API egress = blocked
+
+PostgreSQL ingress:
+HavenBridge API -> PostgreSQL TCP/5432 = allowed
+Unrelated Pods -> PostgreSQL TCP/5432 = blocked
+
+This completes the planned HavenBridge NetworkPolicy security phase.

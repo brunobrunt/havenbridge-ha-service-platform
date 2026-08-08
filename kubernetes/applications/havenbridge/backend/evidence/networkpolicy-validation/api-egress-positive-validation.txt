@@ -1,0 +1,193 @@
+HavenBridge API Egress NetworkPolicy — Positive Validation
+===========================================================
+
+Validation date:
+2026-08-05
+
+Purpose
+-------
+
+This validation confirms that the HavenBridge API remained healthy after the
+egress NetworkPolicy was applied.
+
+The policy restricts outbound traffic from the HavenBridge API Pods and allows
+only:
+
+- Kubernetes DNS through CoreDNS on UDP/53 and TCP/53
+- PostgreSQL on TCP/5432
+
+Manifest path
+-------------
+
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/networkpolicy-egress.yaml
+
+Recommended evidence path
+-------------------------
+
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/evidence/networkpolicy-validation/api-egress-positive-validation.txt
+
+
+1. Applied Egress NetworkPolicy
+-------------------------------
+
+Command:
+
+ssh -i /home/alabi/.ssh/eph_k8s \
+  mino@172.16.10.31 \
+  'kubectl describe networkpolicy \
+    allow-havenbridge-api-egress \
+    --namespace havenbridge'
+
+Observed output:
+
+Name:         allow-havenbridge-api-egress
+Namespace:    havenbridge
+Created on:   2026-08-05 16:09:47 -0600 MDT
+Labels:       app.kubernetes.io/component=backend
+              app.kubernetes.io/name=havenbridge-api
+              app.kubernetes.io/part-of=havenbridge
+Annotations:  <none>
+Spec:
+  PodSelector:     app.kubernetes.io/name=havenbridge-api
+  Not affecting ingress traffic
+  Allowing egress traffic:
+    To Port: 53/UDP
+    To Port: 53/TCP
+    To:
+      NamespaceSelector: kubernetes.io/metadata.name=kube-system
+      PodSelector: k8s-app=kube-dns
+    ----------
+    To Port: 5432/TCP
+    To:
+      NamespaceSelector: kubernetes.io/metadata.name=havenbridge
+      PodSelector: app.kubernetes.io/instance=havenbridge-postgres,app.kubernetes.io/name=postgresql
+  Policy Types: Egress
+
+Interpretation:
+
+- The policy selects only Pods labelled:
+  app.kubernetes.io/name=havenbridge-api
+
+- The policy does not modify ingress traffic.
+
+- The API Pods may send DNS requests to CoreDNS Pods in kube-system on:
+  UDP/53
+  TCP/53
+
+- The API Pods may connect to the HavenBridge PostgreSQL Pod on:
+  TCP/5432
+
+- Other outbound destinations are denied by the egress isolation policy.
+
+
+2. HavenBridge Pod Health
+-------------------------
+
+Observed output:
+
+=== HavenBridge Pods ===
+NAME                               READY   STATUS    RESTARTS   AGE     IP               NODE
+havenbridge-api-554c86f6d5-8dhtp   1/1     Running   0          31h     10.244.35.110    eph-worker01
+havenbridge-api-554c86f6d5-cdhd5   1/1     Running   0          2d21h   10.244.176.224   eph-worker02
+havenbridge-postgres-0             1/1     Running   1          9d      10.244.35.106    eph-worker01
+
+=== API Readiness Conditions ===
+NAME                               READY   PHASE     NODE
+havenbridge-api-554c86f6d5-8dhtp   true    Running   eph-worker01
+havenbridge-api-554c86f6d5-cdhd5   true    Running   eph-worker02
+
+Interpretation:
+
+- Both HavenBridge API replicas remained Ready.
+- One API replica remained on eph-worker01.
+- One API replica remained on eph-worker02.
+- PostgreSQL remained Running.
+- Applying the NetworkPolicy did not restart the application Pods.
+
+
+3. External Readiness Validation
+--------------------------------
+
+Command:
+
+curl -iv \
+  http://havenbridge.lab/health/ready
+
+Observed result:
+
+HTTP/1.1 200 OK
+Content-Length: 18
+Content-Type: application/json
+Server: uvicorn
+
+{"status":"ready"}
+
+Interpretation:
+
+The approved incoming path remained operational:
+
+External client
+        |
+        v
+MetalLB address 172.16.10.40
+        |
+        v
+Traefik
+        |
+        v
+HavenBridge API Service
+        |
+        v
+Ready HavenBridge API Pod
+
+The HTTP 200 response confirms that the API remained ready after egress
+isolation was enabled.
+
+
+4. API Log Validation
+---------------------
+
+Observed log examples:
+
+[pod/havenbridge-api-554c86f6d5-8dhtp/havenbridge-api] INFO: 172.16.10.34:49302 - "GET /health/ready HTTP/1.1" 200 OK
+[pod/havenbridge-api-554c86f6d5-8dhtp/havenbridge-api] INFO: 172.16.10.34:47596 - "GET /health/live HTTP/1.1" 200 OK
+[pod/havenbridge-api-554c86f6d5-8dhtp/havenbridge-api] INFO: 172.16.10.34:46128 - "GET /health/ready HTTP/1.1" 200 OK
+[pod/havenbridge-api-554c86f6d5-8dhtp/havenbridge-api] INFO: 172.16.10.34:37166 - "GET /health/live HTTP/1.1" 200 OK
+[pod/havenbridge-api-554c86f6d5-8dhtp/havenbridge-api] INFO: 172.16.10.34:53518 - "GET /health/ready HTTP/1.1" 200 OK
+
+Interpretation:
+
+- Readiness and liveness requests continued returning HTTP 200.
+- No DNS-resolution, PostgreSQL-connection, connection-refused, or timeout
+  errors appeared in the captured log section.
+
+
+5. Validation Result
+--------------------
+
+The positive egress validation passed.
+
+Confirmed:
+
+- The egress NetworkPolicy is applied to the HavenBridge API Pods.
+- DNS is allowed only to CoreDNS Pods on UDP/53 and TCP/53.
+- PostgreSQL is allowed only on TCP/5432.
+- Both API replicas remain Ready and Running.
+- PostgreSQL remains Running.
+- External readiness returns HTTP 200.
+- The captured API logs show successful readiness and liveness requests.
+- No relevant network or database errors were observed in the captured logs.
+
+Important limitation:
+
+This positive validation confirms that the application remained functional
+after the policy was applied. A separate negative egress test is still required
+to prove that an unapproved outbound destination is blocked.
+
+
+6. Next Evidence File
+---------------------
+
+The negative egress test should be stored separately at:
+
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/evidence/networkpolicy-validation/api-egress-negative-validation.txt

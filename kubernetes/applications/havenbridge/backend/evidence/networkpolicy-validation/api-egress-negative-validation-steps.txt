@@ -1,0 +1,232 @@
+HavenBridge API Egress NetworkPolicy — Negative Validation Steps
+================================================================
+
+Purpose
+-------
+
+This validation proves that the HavenBridge API egress NetworkPolicy blocks an
+outbound destination that is not explicitly allowed.
+
+The production egress policy allows only:
+
+- CoreDNS on UDP/53
+- CoreDNS on TCP/53
+- HavenBridge PostgreSQL on TCP/5432
+
+The negative test attempts to connect to the CoreDNS metrics port TCP/9153.
+Because TCP/9153 is not included in the egress policy, the connection should
+time out.
+
+
+Repository Location
+-------------------
+
+Store this validation-steps file at:
+
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/evidence/networkpolicy-validation/api-egress-negative-validation-steps.txt
+
+Related files:
+
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/evidence/networkpolicy-validation/api-egress-negative-test-job.yaml
+
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/evidence/networkpolicy-validation/api-egress-negative-validation.txt
+
+
+Step 1 — Create the Test Job
+----------------------------
+
+ssh -i /home/alabi/.ssh/eph_k8s \
+  mino@172.16.10.31 \
+  'kubectl apply --filename=-' \
+  < /home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/evidence/networkpolicy-validation/api-egress-negative-test-job.yaml
+
+Observed result:
+
+job.batch/api-egress-negative-test created
+
+
+Step 2 — Wait for Completion
+----------------------------
+
+ssh -i /home/alabi/.ssh/eph_k8s \
+  mino@172.16.10.31 \
+  'kubectl wait \
+    --namespace havenbridge \
+    --for=condition=complete \
+    job/api-egress-negative-test \
+    --timeout=90s'
+
+Observed result:
+
+job.batch/api-egress-negative-test condition met
+
+
+Step 3 — Capture Evidence
+-------------------------
+
+ssh -i /home/alabi/.ssh/eph_k8s \
+  mino@172.16.10.31 \
+  '
+  echo "=== Test Job ==="
+  kubectl get job api-egress-negative-test \
+    --namespace havenbridge
+
+  echo
+  echo "=== Test Pod ==="
+  kubectl get pods \
+    --namespace havenbridge \
+    --selector job-name=api-egress-negative-test \
+    --output wide
+
+  echo
+  echo "=== Test Result ==="
+  kubectl logs \
+    --namespace havenbridge \
+    job/api-egress-negative-test
+  ' \
+  | tee \
+  /home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/evidence/networkpolicy-validation/api-egress-negative-validation.txt
+
+Observed result:
+
+=== Test Job ===
+NAME                       STATUS     COMPLETIONS   DURATION   AGE
+api-egress-negative-test   Complete   1/1           14s        32s
+
+=== Test Pod ===
+NAME                             READY   STATUS      RESTARTS   AGE   IP               NODE
+api-egress-negative-test-r8vl9   0/1     Completed   0          32s   10.244.176.226   eph-worker02
+
+=== Test Result ===
+Testing an egress destination that is not allowed
+
+Destination:
+http://kube-dns.kube-system.svc.cluster.local:9153/metrics
+
+Connecting to kube-dns.kube-system.svc.cluster.local:9153 (10.96.0.10:9153)
+wget: download timed out
+
+EXPECTED: NetworkPolicy blocked TCP port 9153.
+
+
+Step 4 — Interpret the Result
+-----------------------------
+
+DNS resolution succeeded:
+
+kube-dns.kube-system.svc.cluster.local
+        |
+        v
+10.96.0.10
+
+This proves that the allowed CoreDNS port 53 rule worked.
+
+The TCP/9153 connection timed out. This proves that the unapproved CoreDNS
+metrics port was blocked.
+
+Validation result:
+
+PASS
+
+
+Important EndpointSlice Observation
+-----------------------------------
+
+The test Job used:
+
+app.kubernetes.io/name=havenbridge-api
+
+That label caused the production API egress policy to select the test Pod.
+
+The HavenBridge API Service also selects Pods using that label. Kubernetes
+therefore created an additional EndpointSlice containing the test Pod:
+
+havenbridge-api-7s9pw
+Endpoint: 10.244.176.226
+Port: <unset>
+
+The test Pod was not Ready and did not expose the API named port, so it was not
+a valid ready API backend. However, a validation Pod should not appear in the
+production API Service EndpointSlices.
+
+The temporary Job must be removed after the test.
+
+
+Step 5 — Delete the Temporary Job
+---------------------------------
+
+ssh -i /home/alabi/.ssh/eph_k8s \
+  mino@172.16.10.31 \
+  'kubectl delete job api-egress-negative-test \
+    --namespace havenbridge'
+
+Expected:
+
+job.batch "api-egress-negative-test" deleted
+
+
+Step 6 — Verify Cleanup
+-----------------------
+
+ssh -i /home/alabi/.ssh/eph_k8s \
+  mino@172.16.10.31 \
+  '
+  echo "=== Remaining API EndpointSlices ==="
+  kubectl get endpointslice \
+    --namespace havenbridge \
+    --selector kubernetes.io/service-name=havenbridge-api \
+    --output wide
+
+  echo
+  echo "=== API Readiness ==="
+  kubectl get pods \
+    --namespace havenbridge \
+    --selector app.kubernetes.io/name=havenbridge-api \
+    --output wide
+  '
+
+Expected:
+
+Only these real API endpoints remain:
+
+10.244.176.224
+10.244.35.110
+
+The temporary endpoint 10.244.176.226 must be gone.
+
+
+Step 7 — Confirm External Availability
+--------------------------------------
+
+curl -iv \
+  http://havenbridge.lab/health/ready
+
+Expected:
+
+HTTP/1.1 200 OK
+
+{"status":"ready"}
+
+
+Conclusion
+----------
+
+The negative API egress validation succeeded.
+
+Confirmed:
+
+- DNS resolution remained allowed through CoreDNS port 53.
+- TCP/9153 was blocked.
+- The connection timed out as expected.
+- Evidence was saved.
+- The temporary Job and Pod must be deleted.
+- The API EndpointSlice must return to only the two real API Pod endpoints.
+- External readiness must continue returning HTTP 200.
+
+
+Recommended Improvement
+-----------------------
+
+Before repeating this test, revise the test design so the validation Pod uses a
+unique label that the production API Service does not select. Apply an
+equivalent temporary egress policy to that unique test label.

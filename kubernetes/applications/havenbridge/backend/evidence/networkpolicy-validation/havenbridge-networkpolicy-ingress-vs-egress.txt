@@ -1,0 +1,647 @@
+
+text = """HavenBridge NetworkPolicy — Ingress vs Egress Clarification
+================================================================
+
+Purpose
+-------
+
+This note explains the difference between ingress and egress in Kubernetes
+NetworkPolicy, using the HavenBridge API and PostgreSQL workloads as examples.
+
+
+1. The Key Idea
+---------------
+
+In Kubernetes NetworkPolicy, ingress and egress are normally understood from
+the point of view of the selected Pod.
+
+Traffic entering the Pod = ingress
+Traffic leaving the Pod  = egress
+
+This is different from thinking only about the edge of the whole Kubernetes
+cluster.
+
+
+2. API Example
+--------------
+
+Traefik Pod
+     |
+     v
+HavenBridge API Pod
+
+From the HavenBridge API Pod's point of view, this is ingress because traffic
+is entering the API Pod.
+
+This remains ingress even though Traefik is already running inside the cluster.
+
+The HavenBridge API ingress NetworkPolicy therefore says:
+
+Only approved Traefik Pods may reach the HavenBridge API Pods on TCP port 8000.
+
+
+3. PostgreSQL Example
+---------------------
+
+HavenBridge API Pod
+        |
+        v
+PostgreSQL Pod
+
+From the HavenBridge API Pod's point of view, this is egress because traffic is
+leaving the API Pod.
+
+From the PostgreSQL Pod's point of view, the exact same connection is ingress
+because traffic is entering PostgreSQL.
+
+The same connection therefore has two perspectives:
+
+API Pod                         PostgreSQL Pod
+--------                        --------------
+egress  --------------------->  ingress
+
+
+4. Why Both Policies Matter
+---------------------------
+
+API egress policy:
+
+The HavenBridge API is allowed to send traffic to PostgreSQL on TCP port 5432.
+
+PostgreSQL ingress policy:
+
+PostgreSQL is allowed to receive traffic from the HavenBridge API on TCP port
+5432.
+
+Both sides must permit the connection when both workloads are isolated by
+NetworkPolicy.
+
+API egress allows PostgreSQL
+            AND
+PostgreSQL ingress allows API
+            |
+            v
+Connection succeeds
+
+If either side blocks the traffic:
+
+API egress blocks it
+            OR
+PostgreSQL ingress blocks it
+            |
+            v
+Connection fails
+
+
+5. Internet Traffic Example
+---------------------------
+
+External client
+      |
+      v
+MetalLB
+      |
+      v
+Traefik
+      |
+      v
+HavenBridge API Pod
+
+The final connection:
+
+Traefik -> HavenBridge API Pod
+
+is ingress to the API Pod.
+
+The external client does not normally connect directly to the API Pod.
+MetalLB and Traefik handle the external entry path first.
+
+
+6. Cluster Boundary vs Pod Boundary
+-----------------------------------
+
+It is common in general networking to think:
+
+Internet -> cluster = ingress
+Cluster -> internet = egress
+
+That way of speaking is valid when discussing firewalls, routers, cloud
+security groups, gateways, or the outer network boundary.
+
+Kubernetes NetworkPolicy, however, is primarily evaluated relative to selected
+Pods.
+
+Traffic coming toward the selected Pod = ingress
+Traffic leaving the selected Pod       = egress
+
+
+7. HavenBridge Traffic Map
+--------------------------
+
+External client
+      |
+      v
+MetalLB
+      |
+      v
+Traefik Pod
+      |
+      | ingress to API
+      v
+HavenBridge API Pod
+      |
+      | egress from API
+      v
+PostgreSQL Pod
+      ^
+      |
+      +-- ingress to PostgreSQL
+
+
+8. Additional Examples
+----------------------
+
+Traefik -> API
+= ingress to API
+
+API -> PostgreSQL
+= egress from API
+= ingress to PostgreSQL
+
+API -> CoreDNS
+= egress from API
+= ingress to CoreDNS
+
+PostgreSQL -> API
+= egress from PostgreSQL
+= ingress to API
+
+
+9. Simple Rule to Remember
+--------------------------
+
+Imagine standing inside the Pod.
+
+Ask:
+
+"Is traffic coming toward me?"
+
+If yes:
+Ingress
+
+Ask:
+
+"Is traffic leaving me?"
+
+If yes:
+Egress
+
+
+10. HavenBridge Policy Relationship
+-----------------------------------
+
+Current API ingress policy:
+
+Traefik
+   |
+   v
+API:8000
+
+Allowed
+
+
+Current API egress policy:
+
+API
+  |----> CoreDNS:53
+  |
+  +----> PostgreSQL:5432
+
+Allowed
+
+
+Planned PostgreSQL ingress policy:
+
+API
+  |
+  v
+PostgreSQL:5432
+
+Allowed
+
+
+The final relationship becomes:
+
+Traefik
+   |
+   | ingress to API
+   v
+HavenBridge API
+   |
+   | egress from API
+   v
+PostgreSQL
+   ^
+   |
+   +-- ingress to PostgreSQL
+
+
+11. Most Important Summary
+--------------------------
+
+Ingress and egress in Kubernetes NetworkPolicy are relative to the workload
+being protected, not automatically relative to the entire Kubernetes cluster.
+
+Into the Pod   = ingress
+Out of the Pod = egress
+
+For HavenBridge:
+
+Traefik -> API
+= ingress to API
+
+API -> PostgreSQL
+= egress from API
+= ingress to PostgreSQL
+"""
+
+12. Where MetalLB Fits
+----------------------
+
+MetalLB has a different job from Kubernetes NetworkPolicy.
+
+MetalLB answers this question:
+
+"How does traffic from outside this bare-metal Kubernetes cluster reach a
+LoadBalancer Service?"
+
+NetworkPolicy answers this question:
+
+"Once traffic is moving between Pods, which connections are allowed or
+blocked?"
+
+
+HavenBridge MetalLB Address
+---------------------------
+
+HavenBridge uses this external application address:
+
+172.16.10.40
+
+That address belongs to the Traefik LoadBalancer Service.
+
+In a cloud Kubernetes environment, a cloud provider such as AWS, Azure, or GCP
+would normally provide the external LoadBalancer implementation.
+
+HavenBridge is a bare-metal/homelab cluster, so MetalLB provides that
+LoadBalancer functionality.
+
+
+MetalLB's Role in the Incoming Traffic Path
+-------------------------------------------
+
+The external path is:
+
+External client
+      |
+      v
+havenbridge.lab
+      |
+      v
+172.16.10.40
+      |
+      v
+MetalLB
+      |
+      v
+Traefik LoadBalancer Service
+      |
+      v
+Traefik Pod
+      |
+      | ingress to API
+      v
+HavenBridge API Pod
+
+MetalLB makes 172.16.10.40 reachable from the local network.
+
+In HavenBridge's Layer 2 configuration, MetalLB advertises the LoadBalancer IP
+on the local network so clients can reach it.
+
+MetalLB therefore gets the traffic to the Kubernetes service entry point.
+
+
+What MetalLB Does NOT Do
+------------------------
+
+MetalLB does not decide:
+
+- whether a Traefik Pod is allowed to reach an API Pod;
+- whether an API Pod is allowed to reach PostgreSQL;
+- whether an unauthorized Pod should be blocked;
+- which Pods satisfy a namespaceSelector;
+- which Pods satisfy a podSelector;
+- whether TCP/5432 or TCP/9153 should be permitted by NetworkPolicy.
+
+Those decisions belong to Kubernetes NetworkPolicy and its enforcement by the
+cluster networking implementation.
+
+
+MetalLB vs NetworkPolicy
+------------------------
+
+MetalLB:
+
+External network
+      |
+      v
+172.16.10.40
+      |
+      v
+Traefik LoadBalancer Service
+
+Main responsibility:
+
+Make the LoadBalancer IP reachable.
+
+
+NetworkPolicy:
+
+Traefik Pod
+      |
+      | allowed only if ingress policy permits it
+      v
+HavenBridge API Pod
+      |
+      | allowed only if egress policy permits it
+      v
+PostgreSQL Pod
+
+Main responsibility:
+
+Allow or deny Pod network communication.
+
+
+Does MetalLB Participate in API Ingress Policy?
+-----------------------------------------------
+
+Not directly.
+
+The HavenBridge API ingress policy allows:
+
+Traefik Pod
+      |
+      v
+API Pod:8000
+
+The source that the API NetworkPolicy is concerned with is the Traefik Pod.
+
+MetalLB helped the original external request reach Traefik, but MetalLB is not
+the workload being granted permission by the API NetworkPolicy.
+
+Think of the path as two separate responsibilities:
+
+Step 1:
+
+External client
+      |
+      v
+MetalLB
+      |
+      v
+Traefik
+
+MetalLB solves external reachability.
+
+Step 2:
+
+Traefik
+      |
+      v
+HavenBridge API
+
+NetworkPolicy controls whether this Pod-to-Pod connection is permitted.
+
+
+Does MetalLB Participate in API Egress?
+---------------------------------------
+
+No, not in the normal HavenBridge API-to-PostgreSQL path.
+
+The API connects to PostgreSQL using the internal Kubernetes network:
+
+HavenBridge API Pod
+      |
+      | egress
+      v
+havenbridge-postgres ClusterIP Service
+      |
+      v
+PostgreSQL Pod
+
+This traffic stays inside the Kubernetes cluster.
+
+It does not need the Traefik external LoadBalancer IP and it does not pass
+through MetalLB.
+
+
+Does API-to-CoreDNS Traffic Use MetalLB?
+----------------------------------------
+
+No.
+
+The API reaches CoreDNS through the internal kube-dns ClusterIP:
+
+HavenBridge API Pod
+      |
+      | egress
+      v
+kube-dns Service
+10.96.0.10
+      |
+      v
+CoreDNS Pods
+
+MetalLB is not involved because kube-dns is a ClusterIP Service, not a
+LoadBalancer Service.
+
+
+Does General Pod Egress to the Internet Use MetalLB?
+-----------------------------------------------------
+
+Normally, no.
+
+MetalLB primarily exposes Kubernetes LoadBalancer Services to networks outside
+the cluster.
+
+A Pod making an outbound connection to the internet normally uses the
+cluster/node networking path, routing, NAT, and the CNI/network stack.
+
+Therefore:
+
+External traffic entering through the Traefik LoadBalancer
+= MetalLB is involved.
+
+API -> PostgreSQL
+= MetalLB is not involved.
+
+API -> CoreDNS
+= MetalLB is not involved.
+
+Normal Pod -> internet outbound traffic
+= MetalLB is normally not the egress gateway.
+
+
+Simple Analogy
+--------------
+
+Think of HavenBridge as a secured office building.
+
+MetalLB
+= the street address and front entrance that lets visitors find the building.
+
+Traefik
+= the receptionist who receives visitors and sends them to the correct room.
+
+NetworkPolicy
+= the access-control rules on the internal doors.
+
+HavenBridge API
+= one office.
+
+PostgreSQL
+= a protected records room.
+
+Using this analogy:
+
+A visitor first needs the building address:
+
+havenbridge.lab -> 172.16.10.40
+
+MetalLB makes that address reachable.
+
+The visitor reaches Traefik.
+
+Traefik knows that the request should go to the HavenBridge API.
+
+Then the API ingress NetworkPolicy says:
+
+"Only Traefik is allowed through this API door."
+
+Later, when the API needs PostgreSQL:
+
+API -> PostgreSQL
+
+the API egress policy says:
+
+"The API is allowed to leave its room and go to the PostgreSQL room on
+TCP/5432."
+
+The PostgreSQL ingress policy says:
+
+"Only approved API traffic may enter the PostgreSQL room on TCP/5432."
+
+MetalLB is no longer involved in that internal movement.
+
+
+Complete HavenBridge Security Flow
+----------------------------------
+
+External client
+      |
+      | resolves havenbridge.lab
+      v
+172.16.10.40
+      |
+      | MetalLB makes this LoadBalancer IP reachable
+      v
+Traefik LoadBalancer Service
+      |
+      v
+Traefik Pod
+      |
+      | API ingress NetworkPolicy
+      | Traefik -> API:8000 allowed
+      v
+HavenBridge API Pod
+      |
+      | API egress NetworkPolicy
+      | API -> PostgreSQL:5432 allowed
+      v
+PostgreSQL Pod
+      ^
+      |
+      | PostgreSQL ingress NetworkPolicy
+      | API -> PostgreSQL:5432 allowed
+      |
+
+
+Key Separation of Responsibilities
+----------------------------------
+
+MetalLB
+= External reachability for LoadBalancer Services.
+
+Traefik
+= HTTP routing and application entry point.
+
+Kubernetes Service
+= Stable virtual address and Pod discovery.
+
+NetworkPolicy
+= Pod-level traffic permissions.
+
+Calico
+= Enforces the NetworkPolicy rules in the HavenBridge cluster.
+
+The simplest way to remember it is:
+
+MetalLB gets traffic INTO the Kubernetes service entry point.
+
+Traefik decides WHERE the HTTP request should go.
+
+NetworkPolicy decides WHETHER the Pod-to-Pod connection is allowed.
+
+
+13. Final Mental Model
+----------------------
+
+For HavenBridge:
+
+External reachability:
+
+Client
+  |
+  v
+MetalLB
+  |
+  v
+Traefik
+
+
+Application ingress:
+
+Traefik
+  |
+  | ingress
+  v
+API
+
+
+Application egress / database ingress:
+
+API
+  |
+  | egress from API
+  v
+PostgreSQL
+  ^
+  |
+  +-- ingress to PostgreSQL
+
+
+MetalLB is involved in the first section.
+
+NetworkPolicy is involved in the Pod communication sections.
+
+They complement each other, but they solve different networking problems.

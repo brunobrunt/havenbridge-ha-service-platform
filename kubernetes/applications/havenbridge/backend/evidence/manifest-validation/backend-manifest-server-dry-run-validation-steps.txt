@@ -1,0 +1,42 @@
+HavenBridge Backend Manifest Server Dry-Run Validation Steps
+======================================================
+
+Purpose
+-------
+Validate all production backend Kubernetes manifests against the live Kubernetes API
+without changing cluster state.
+
+Repository root:
+/home/alabi/projects/havenbridge-ha-service-platform
+
+Evidence directory:
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/evidence/manifest-validation/
+
+Command
+-------
+for FILE in \
+  /home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/configmap.yaml \
+  /home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/deployment.yaml \
+  /home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/service.yaml \
+  /home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/httproute.yaml \
+  /home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/pdb.yaml \
+  /home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/networkpolicy.yaml \
+  /home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/networkpolicy-egress.yaml \
+  /home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/networkpolicy-postgres-ingress.yaml
+do
+  echo
+  echo "=== Validating: $FILE ==="
+  ssh -i /home/alabi/.ssh/eph_k8s \
+    mino@172.16.10.31 \
+    'kubectl apply --dry-run=server --filename=-' \
+    < "$FILE"
+done
+
+Interpretation
+--------------
+"unchanged (server dry run)" means the manifest is valid and matches live desired state.
+
+"configured (server dry run)" means the manifest is valid, but applying it would
+change the currently running resource.
+
+No cluster resources are modified by --dry-run=server.

@@ -1,0 +1,51 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: postgres-unauthorized-client
+  namespace: default
+  labels:
+    app.kubernetes.io/name: postgres-unauthorized-client
+
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+
+  containers:
+    - name: client
+      image: busybox:1.36.1
+      imagePullPolicy: IfNotPresent
+
+      command:
+        - sh
+        - -c
+
+      args:
+        - |
+          echo "Testing unauthorized PostgreSQL access"
+
+          if nc -z -w 5 \
+            havenbridge-postgres.havenbridge.svc.cluster.local \
+            5432
+          then
+            echo
+            echo "UNEXPECTED: PostgreSQL connection was allowed."
+            exit 1
+          else
+            echo
+            echo "EXPECTED: PostgreSQL ingress NetworkPolicy blocked the connection."
+            exit 0
+          fi
+
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+            - ALL

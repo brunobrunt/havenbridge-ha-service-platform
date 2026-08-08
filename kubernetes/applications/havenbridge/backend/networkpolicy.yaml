@@ -1,0 +1,32 @@
+####   allow-traefik-to-havenbridge-api
+###    → controls incoming API traffic
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-traefik-to-havenbridge-api
+  namespace: havenbridge
+  labels:
+    app.kubernetes.io/name: havenbridge-api
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: havenbridge
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: havenbridge-api
+
+  policyTypes:
+    - Ingress
+
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+
+      ports:
+        - protocol: TCP
+          port: 8000

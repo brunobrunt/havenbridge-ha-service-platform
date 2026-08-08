@@ -1,0 +1,28 @@
+=== Node ===
+NAME           STATUS   ROLES    AGE   VERSION
+eph-worker01   Ready    worker   10d   v1.36.2
+
+=== API Pods ===
+NAME                               READY   STATUS    RESTARTS   AGE   IP               NODE           NOMINATED NODE   READINESS GATES
+havenbridge-api-554c86f6d5-4zhwp   1/1     Running   0          9h    10.244.35.109    eph-worker01   <none>           <none>
+havenbridge-api-554c86f6d5-cdhd5   1/1     Running   0          26h   10.244.176.224   eph-worker02   <none>           <none>
+
+=== PodDisruptionBudget ===
+NAME              MIN AVAILABLE   MAX UNAVAILABLE   ALLOWED DISRUPTIONS   AGE
+havenbridge-api   N/A             1                 1                     132m
+
+=== Service EndpointSlice ===
+NAME                    ADDRESSTYPE   PORTS   ENDPOINTS                      AGE
+havenbridge-api-b97n6   IPv4          8000    10.244.176.224,10.244.35.109   3d3h
+
+=== All workloads on eph-worker01 ===
+NAMESPACE        NAME                                  READY   STATUS    RESTARTS       AGE    IP              NODE           NOMINATED NODE   READINESS GATES
+calico-system    calico-node-pdtb5                     1/1     Running   6 (2d6h ago)   10d    172.16.10.34    eph-worker01   <none>           <none>
+calico-system    csi-node-driver-vchzs                 2/2     Running   4              10d    10.244.35.105   eph-worker01   <none>           <none>
+havenbridge      havenbridge-api-554c86f6d5-4zhwp      1/1     Running   0              9h     10.244.35.109   eph-worker01   <none>           <none>
+havenbridge      havenbridge-postgres-0                1/1     Running   1              7d9h   10.244.35.106   eph-worker01   <none>           <none>
+kube-system      csi-nfs-node-sgc9v                    3/3     Running   4 (2d6h ago)   8d     172.16.10.34    eph-worker01   <none>           <none>
+kube-system      kube-proxy-vmwmk                      1/1     Running   2              10d    172.16.10.34    eph-worker01   <none>           <none>
+metallb-system   metallb-controller-75f6b7f996-x7jpp   1/1     Running   5 (2d6h ago)   9d     10.244.35.103   eph-worker01   <none>           <none>
+metallb-system   metallb-speaker-94pfb                 1/1     Running   8 (2d6h ago)   9d     172.16.10.34    eph-worker01   <none>           <none>
+traefik          traefik-6dcd6ffdcd-zvpcl              1/1     Running   4 (2d6h ago)   8d     10.244.35.104   eph-worker01   <none>           <none>

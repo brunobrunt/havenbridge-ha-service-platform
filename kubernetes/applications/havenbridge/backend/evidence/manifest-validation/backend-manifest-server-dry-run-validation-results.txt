@@ -1,0 +1,68 @@
+HavenBridge Backend Manifest Server Dry-Run Validation Results
+========================================================
+
+Validation status: PASS
+
+Observed results
+----------------
+configmap/havenbridge-api-config unchanged (server dry run)
+
+deployment.apps/havenbridge-api unchanged (server dry run)
+
+service/havenbridge-api unchanged (server dry run)
+
+httproute.gateway.networking.k8s.io/havenbridge-api unchanged (server dry run)
+
+poddisruptionbudget.policy/havenbridge-api configured (server dry run)
+
+networkpolicy.networking.k8s.io/allow-traefik-to-havenbridge-api unchanged (server dry run)
+
+networkpolicy.networking.k8s.io/allow-havenbridge-api-egress unchanged (server dry run)
+
+networkpolicy.networking.k8s.io/allow-havenbridge-api-to-postgres unchanged (server dry run)
+
+Conclusion
+----------
+All eight manifests were accepted by the live Kubernetes API.
+
+Seven manifests match the current live resources.
+
+The PodDisruptionBudget manifest is valid but differs from the live PDB.
+That difference should be reviewed with kubectl diff before staging/commit
+or applying any change.
+
+
+## PodDisruptionBudget Verification
+
+The server-side dry run reported:
+
+poddisruptionbudget.policy/havenbridge-api configured (server dry run)
+
+Because this differed from the `unchanged` result returned for the other
+resources, the local manifest was compared directly with the live resource
+using:
+
+kubectl diff --filename=-
+
+The command produced no output.
+
+This confirms that there is no desired-state difference between:
+
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/pdb.yaml
+
+and the live:
+
+PodDisruptionBudget/havenbridge-api
+
+Final conclusion:
+
+* The PodDisruptionBudget manifest is valid.
+* The local PDB configuration matches the live Kubernetes resource.
+* No PDB change needs to be applied.
+
+## Overall Validation Result
+
+PASS
+
+All eight HavenBridge backend Kubernetes manifests were accepted by the live
+Kubernetes API and match the intended running configuration.

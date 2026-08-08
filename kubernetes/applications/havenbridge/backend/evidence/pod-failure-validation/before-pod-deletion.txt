@@ -1,0 +1,8 @@
+API Pods:
+NAME                               READY   STATUS    RESTARTS   AGE   IP               NODE           NOMINATED NODE   READINESS GATES
+havenbridge-api-554c86f6d5-6rkkt   1/1     Running   0          16h   10.244.35.108    eph-worker01   <none>           <none>
+havenbridge-api-554c86f6d5-cdhd5   1/1     Running   0          16h   10.244.176.224   eph-worker02   <none>           <none>
+
+Service EndpointSlices:
+NAME                    ADDRESSTYPE   PORTS   ENDPOINTS                      AGE
+havenbridge-api-b97n6   IPv4          8000    10.244.35.108,10.244.176.224   2d18h

@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: havenbridge-api-config
+  namespace: havenbridge
+  labels:
+    app.kubernetes.io/name: havenbridge-api
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: havenbridge
+data:
+  APP_NAME: "HavenBridge API"
+  APP_ENVIRONMENT: "production"
+  APP_HOST: "0.0.0.0"
+  APP_PORT: "8000"
+  LOG_LEVEL: "INFO"
+
+  POSTGRES_HOST: "havenbridge-postgres"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "havenbridge"
+  POSTGRES_USER: "havenbridge_admin"
+  POSTGRES_PASSWORD_FILE: "/run/secrets/postgres-password"
+
+  DB_POOL_SIZE: "5"
+  DB_MAX_OVERFLOW: "10"
+  DB_CONNECT_TIMEOUT_SECONDS: "5"
+
+  # Temporary during the first application phase.
+  # Alembic migrations will replace automatic table creation later.
+  DB_AUTO_CREATE_TABLES: "true"

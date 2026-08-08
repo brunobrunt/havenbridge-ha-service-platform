@@ -1,0 +1,16 @@
+=== Node ===
+NAME           STATUS   ROLES    AGE   VERSION
+eph-worker01   Ready    worker   10d   v1.36.2
+
+=== API Pods ===
+NAME                               READY   STATUS    RESTARTS   AGE    IP               NODE           NOMINATED NODE   READINESS GATES
+havenbridge-api-554c86f6d5-8dhtp   1/1     Running   0          137m   10.244.35.110    eph-worker01   <none>           <none>
+havenbridge-api-554c86f6d5-cdhd5   1/1     Running   0          40h    10.244.176.224   eph-worker02   <none>           <none>
+
+=== PodDisruptionBudget ===
+NAME              MIN AVAILABLE   MAX UNAVAILABLE   ALLOWED DISRUPTIONS   AGE
+havenbridge-api   N/A             1                 1                     16h
+
+=== EndpointSlice ===
+NAME                    ADDRESSTYPE   PORTS   ENDPOINTS                      AGE
+havenbridge-api-b97n6   IPv4          8000    10.244.176.224,10.244.35.110   3d17h

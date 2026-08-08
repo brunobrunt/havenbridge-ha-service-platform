@@ -1,0 +1,170 @@
+HavenBridge PostgreSQL Ingress NetworkPolicy — Validation Steps
+================================================================
+
+Purpose
+-------
+Validate that PostgreSQL accepts TCP/5432 only from the HavenBridge API and blocks unrelated Pods.
+
+Manifest:
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/networkpolicy-postgres-ingress.yaml
+
+Steps file:
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/evidence/networkpolicy-validation/postgres-ingress-validation-steps.txt
+
+Results file:
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/evidence/networkpolicy-validation/postgres-ingress-validation.txt
+
+1. Apply the policy
+-------------------
+ssh -i /home/alabi/.ssh/eph_k8s \
+  mino@172.16.10.31 \
+  'kubectl apply --filename=-' \
+  < /home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/networkpolicy-postgres-ingress.yaml
+
+2. Describe the policy
+----------------------
+ssh -i /home/alabi/.ssh/eph_k8s \
+  mino@172.16.10.31 \
+  'kubectl describe networkpolicy \
+    allow-havenbridge-api-to-postgres \
+    --namespace havenbridge'
+
+Confirm:
+- destination Pods are PostgreSQL;
+- policy type is Ingress;
+- source namespace is havenbridge;
+- source Pod label is app.kubernetes.io/name=havenbridge-api;
+- allowed port is TCP/5432.
+
+3. Positive validation
+----------------------
+curl -iv http://havenbridge.lab/health/ready
+
+Expected:
+HTTP/1.1 200 OK
+{"status":"ready"}
+
+Check Pods:
+ssh -i /home/alabi/.ssh/eph_k8s \
+  mino@172.16.10.31 \
+  'kubectl get pods --namespace havenbridge --output wide'
+
+Check recent API logs:
+ssh -i /home/alabi/.ssh/eph_k8s \
+  mino@172.16.10.31 \
+  'kubectl logs \
+    --namespace havenbridge \
+    --selector app.kubernetes.io/name=havenbridge-api \
+    --tail=50 \
+    --prefix'
+
+4. Negative-test manifest
+-------------------------
+Create:
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/evidence/networkpolicy-validation/postgres-unauthorized-client.yaml
+
+Use:
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: postgres-unauthorized-client
+  namespace: default
+  labels:
+    app.kubernetes.io/name: postgres-unauthorized-client
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: client
+      image: busybox:1.36.1
+      imagePullPolicy: IfNotPresent
+      command:
+        - sh
+        - -c
+      args:
+        - |
+          echo "Testing unauthorized PostgreSQL access"
+          if nc -z -w 5 havenbridge-postgres.havenbridge.svc.cluster.local 5432
+          then
+            echo "UNEXPECTED: PostgreSQL connection was allowed."
+            exit 1
+          else
+            echo "EXPECTED: PostgreSQL ingress NetworkPolicy blocked the connection."
+            exit 0
+          fi
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+            - ALL
+
+5. Dry run the test Pod
+-----------------------
+ssh -i /home/alabi/.ssh/eph_k8s \
+  mino@172.16.10.31 \
+  'kubectl apply --dry-run=server --filename=-' \
+  < /home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/evidence/networkpolicy-validation/postgres-unauthorized-client.yaml
+
+6. Create the test Pod
+----------------------
+ssh -i /home/alabi/.ssh/eph_k8s \
+  mino@172.16.10.31 \
+  'kubectl apply --filename=-' \
+  < /home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/evidence/networkpolicy-validation/postgres-unauthorized-client.yaml
+
+7. Wait for completion
+----------------------
+ssh -i /home/alabi/.ssh/eph_k8s \
+  mino@172.16.10.31 \
+  'kubectl wait \
+    --namespace default \
+    --for=jsonpath="{.status.phase}"=Succeeded \
+    pod/postgres-unauthorized-client \
+    --timeout=90s'
+
+8. Capture evidence
+-------------------
+ssh -i /home/alabi/.ssh/eph_k8s \
+  mino@172.16.10.31 \
+  '
+  echo "=== PostgreSQL Ingress NetworkPolicy ==="
+  kubectl describe networkpolicy allow-havenbridge-api-to-postgres --namespace havenbridge
+  echo
+  echo "=== HavenBridge Pods ==="
+  kubectl get pods --namespace havenbridge --output wide
+  echo
+  echo "=== Unauthorized PostgreSQL Test ==="
+  kubectl logs postgres-unauthorized-client --namespace default
+  ' | tee /home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/evidence/networkpolicy-validation/postgres-ingress-validation.txt
+
+9. Recheck external readiness
+-----------------------------
+curl -iv http://havenbridge.lab/health/ready
+
+10. Cleanup
+-----------
+ssh -i /home/alabi/.ssh/eph_k8s \
+  mino@172.16.10.31 \
+  'kubectl delete pod postgres-unauthorized-client --namespace default --ignore-not-found'
+
+Expected final result
+---------------------
+Allowed:
+HavenBridge API -> PostgreSQL TCP/5432
+
+Blocked:
+Unauthorized Pod -> PostgreSQL TCP/5432
+
+Successful validation confirms:
+- API remains healthy;
+- PostgreSQL remains healthy;
+- API-to-PostgreSQL is allowed;
+- unrelated Pods cannot connect to PostgreSQL TCP/5432.

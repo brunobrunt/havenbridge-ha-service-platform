@@ -1,0 +1,5 @@
+Testing direct access to the HavenBridge API
+Connecting to havenbridge-api.havenbridge.svc.cluster.local (10.109.62.24:80)
+wget: download timed out
+
+EXPECTED: NetworkPolicy blocked the connection.

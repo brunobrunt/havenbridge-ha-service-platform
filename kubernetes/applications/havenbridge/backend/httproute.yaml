@@ -1,0 +1,32 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: havenbridge-api
+  namespace: havenbridge
+  labels:
+    app.kubernetes.io/name: havenbridge-api
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: havenbridge
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: havenbridge-gateway
+      namespace: traefik
+      sectionName: web
+
+  hostnames:
+    - havenbridge.lab
+
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: havenbridge-api
+          port: 80
+          weight: 1

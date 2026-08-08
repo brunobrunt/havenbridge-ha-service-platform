@@ -1,0 +1,18 @@
+=== Test Job ===
+NAME                       STATUS     COMPLETIONS   DURATION   AGE
+api-egress-negative-test   Complete   1/1           14s        32s
+
+=== Test Pod ===
+NAME                             READY   STATUS      RESTARTS   AGE   IP               NODE           NOMINATED NODE   READINESS GATES
+api-egress-negative-test-r8vl9   0/1     Completed   0          32s   10.244.176.226   eph-worker02   <none>           <none>
+
+=== Test Result ===
+Testing an egress destination that is not allowed
+
+Destination:
+http://kube-dns.kube-system.svc.cluster.local:9153/metrics
+
+Connecting to kube-dns.kube-system.svc.cluster.local:9153 (10.96.0.10:9153)
+wget: download timed out
+
+EXPECTED: NetworkPolicy blocked TCP port 9153.

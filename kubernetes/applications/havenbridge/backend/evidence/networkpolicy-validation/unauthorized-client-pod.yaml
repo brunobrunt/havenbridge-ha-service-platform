@@ -1,0 +1,53 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: unauthorized-api-client
+  namespace: default
+  labels:
+    app.kubernetes.io/name: unauthorized-api-client
+
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+
+  containers:
+    - name: unauthorized-client
+      image: busybox:1.36.1
+      imagePullPolicy: IfNotPresent
+
+      command:
+        - sh
+        - -c
+
+      args:
+        - |
+          echo "Testing direct access to the HavenBridge API"
+
+          if wget \
+            --timeout=5 \
+            --tries=1 \
+            --output-document=- \
+            http://havenbridge-api.havenbridge.svc.cluster.local/health/ready
+          then
+            echo
+            echo "UNEXPECTED: The connection was allowed."
+            exit 1
+          else
+            echo
+            echo "EXPECTED: NetworkPolicy blocked the connection."
+            exit 0
+          fi
+
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+            - ALL
