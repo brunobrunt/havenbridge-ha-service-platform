@@ -1,0 +1,331 @@
+from pathlib import Path
+
+content = """HavenBridge NetworkPolicy podSelector Clarification
+===================================================
+
+This note explains why a Kubernetes NetworkPolicy may contain more than one
+podSelector and how the selectors behave inside an egress rule.
+
+Example Policy Structure
+------------------------
+
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: havenbridge-api
+
+  policyTypes:
+    - Egress
+
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+
+      ports:
+        - protocol: UDP
+          port: 53
+
+        - protocol: TCP
+          port: 53
+
+
+1. Top-Level spec.podSelector
+-----------------------------
+
+Example:
+
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: havenbridge-api
+
+This selector answers:
+
+"Which Pods should this NetworkPolicy apply to?"
+
+It selects the HavenBridge API Pods.
+
+These Pods are the source of the outgoing traffic.
+
+Flow:
+
+HavenBridge API Pods
+        |
+        v
+Their outbound traffic is restricted by this policy
+
+
+2. egress.to.podSelector
+------------------------
+
+Example:
+
+egress:
+  - to:
+      - podSelector:
+          matchLabels:
+            k8s-app: kube-dns
+
+This selector answers:
+
+"Which destination Pods may the selected API Pods contact?"
+
+It selects Pods with the label:
+
+k8s-app=kube-dns
+
+In this cluster, those are the CoreDNS Pods.
+
+
+3. Why namespaceSelector Is Also Needed
+---------------------------------------
+
+Example:
+
+namespaceSelector:
+  matchLabels:
+    kubernetes.io/metadata.name: kube-system
+
+This answers:
+
+"Which namespace must the destination Pod belong to?"
+
+CoreDNS runs in:
+
+kube-system
+
+Therefore, the complete destination must satisfy both conditions:
+
+Namespace is kube-system
+        AND
+Pod has the label k8s-app=kube-dns
+
+
+4. Why Both Selectors Are in the Same List Item
+-----------------------------------------------
+
+Example:
+
+- namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: kube-system
+  podSelector:
+    matchLabels:
+      k8s-app: kube-dns
+
+There is only one dash before namespaceSelector.
+
+That means namespaceSelector and podSelector belong to the same destination
+peer.
+
+They are combined using AND logic.
+
+The destination must be:
+
+- inside the kube-system namespace; and
+- labelled k8s-app=kube-dns.
+
+This precisely selects the CoreDNS Pods.
+
+
+5. What Happens with Only namespaceSelector
+-------------------------------------------
+
+Example:
+
+egress:
+  - to:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: kube-system
+
+This means the selected API Pods may contact Pods in the kube-system namespace.
+
+If ports are limited to 53, traffic is still restricted to port 53, but the
+destination could be any Pod in kube-system listening on that port.
+
+This is broader than necessary.
+
+
+6. What Happens with Only podSelector
+-------------------------------------
+
+Example:
+
+egress:
+  - to:
+      - podSelector:
+          matchLabels:
+            k8s-app: kube-dns
+
+When a podSelector appears without a namespaceSelector inside a NetworkPolicy,
+it selects matching Pods in the same namespace as the NetworkPolicy.
+
+The NetworkPolicy exists in:
+
+havenbridge
+
+Therefore, Kubernetes would look for:
+
+k8s-app=kube-dns
+
+inside:
+
+havenbridge
+
+CoreDNS actually runs in:
+
+kube-system
+
+So this rule would not match the real CoreDNS Pods.
+
+
+7. Same List Item Versus Separate List Items
+--------------------------------------------
+
+Same list item:
+
+to:
+  - namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: kube-system
+    podSelector:
+      matchLabels:
+        k8s-app: kube-dns
+
+Meaning:
+
+Namespace is kube-system
+        AND
+Pod has k8s-app=kube-dns
+
+
+Separate list items:
+
+to:
+  - namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: kube-system
+
+  - podSelector:
+      matchLabels:
+        k8s-app: kube-dns
+
+Meaning:
+
+Any Pod in kube-system
+        OR
+A Pod with k8s-app=kube-dns in the NetworkPolicy's own namespace
+
+This is not the same and is less precise.
+
+
+8. Ports Section
+----------------
+
+Example:
+
+ports:
+  - protocol: UDP
+    port: 53
+
+  - protocol: TCP
+    port: 53
+
+This limits the approved CoreDNS destination traffic to:
+
+UDP port 53
+TCP port 53
+
+UDP handles most DNS queries.
+
+TCP is also allowed because DNS may fall back to TCP for larger responses.
+
+
+9. Full Rule in Plain English
+-----------------------------
+
+The complete rule means:
+
+HavenBridge API Pods
+        |
+        v
+may contact
+        |
+        v
+Pods labelled k8s-app=kube-dns
+        |
+        v
+inside the kube-system namespace
+        |
+        v
+only on UDP port 53 and TCP port 53
+
+
+10. Most Important Distinction
+------------------------------
+
+Top-level spec.podSelector:
+
+"Which Pods does this policy protect?"
+
+egress.to.podSelector:
+
+"Which destination Pods may those protected Pods contact?"
+
+namespaceSelector:
+
+"Which namespace must those destination Pods belong to?"
+
+
+11. HavenBridge Example
+-----------------------
+
+Source Pods:
+
+app.kubernetes.io/name=havenbridge-api
+
+Source namespace:
+
+havenbridge
+
+Allowed destination namespace:
+
+kube-system
+
+Allowed destination Pods:
+
+k8s-app=kube-dns
+
+Allowed destination ports:
+
+UDP/53
+TCP/53
+
+Result:
+
+HavenBridge API Pods can use CoreDNS for Kubernetes service-name resolution,
+while unrelated outbound destinations remain blocked once the egress policy is
+applied.
+"""
+
+path = Path("/mnt/data/havenbridge-networkpolicy-podselector-clarification.txt")
+path.write_text(content, encoding="utf-8")
+print(f"Created: {path}")
+
+## So the full rule reads:
+
+HavenBridge API Pods
+        ↓
+may contact
+        ↓
+Pods labelled k8s-app=kube-dns
+        ↓
+inside the kube-system namespace
+        ↓
+only on UDP/53 and TCP/53

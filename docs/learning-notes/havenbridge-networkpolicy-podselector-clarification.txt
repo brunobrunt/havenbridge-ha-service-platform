@@ -1,0 +1,187 @@
+HavenBridge NetworkPolicy podSelector Clarification
+===================================================
+
+Example
+-------
+
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: havenbridge-api
+
+  policyTypes:
+    - Egress
+
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+
+1. Top-level spec.podSelector
+-----------------------------
+
+This answers:
+
+"Which Pods should this NetworkPolicy apply to?"
+
+In this policy, it selects the HavenBridge API Pods:
+
+app.kubernetes.io/name=havenbridge-api
+
+Those API Pods are the source of the outgoing traffic.
+
+
+2. egress.to.podSelector
+------------------------
+
+This answers:
+
+"Which destination Pods may the selected API Pods contact?"
+
+In this policy, it selects Pods labelled:
+
+k8s-app=kube-dns
+
+Those are the CoreDNS Pods.
+
+
+3. namespaceSelector
+--------------------
+
+This answers:
+
+"Which namespace must the destination Pod belong to?"
+
+The rule selects:
+
+kubernetes.io/metadata.name=kube-system
+
+CoreDNS runs in the kube-system namespace.
+
+
+4. Why both selectors are used together
+---------------------------------------
+
+The destination must satisfy both conditions:
+
+Namespace is kube-system
+        AND
+Pod has the label k8s-app=kube-dns
+
+Because namespaceSelector and podSelector are in the same list item, Kubernetes
+combines them with AND logic.
+
+This precisely selects the CoreDNS Pods.
+
+
+5. Only namespaceSelector
+-------------------------
+
+If the rule contained only:
+
+namespaceSelector:
+  matchLabels:
+    kubernetes.io/metadata.name: kube-system
+
+then the API could contact any Pod in kube-system on the allowed ports.
+
+That is broader than necessary.
+
+
+6. Only podSelector
+-------------------
+
+If the rule contained only:
+
+podSelector:
+  matchLabels:
+    k8s-app: kube-dns
+
+then Kubernetes would look for matching Pods in the same namespace as the
+NetworkPolicy.
+
+The policy exists in the havenbridge namespace, but CoreDNS exists in
+kube-system. Therefore, the rule would not match the real CoreDNS Pods.
+
+
+7. Same item versus separate items
+----------------------------------
+
+Same list item:
+
+to:
+  - namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: kube-system
+    podSelector:
+      matchLabels:
+        k8s-app: kube-dns
+
+Meaning:
+
+Namespace is kube-system
+        AND
+Pod has k8s-app=kube-dns
+
+
+Separate list items:
+
+to:
+  - namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: kube-system
+
+  - podSelector:
+      matchLabels:
+        k8s-app: kube-dns
+
+Meaning:
+
+Any Pod in kube-system
+        OR
+A matching Pod in the policy's own namespace
+
+This is not the same and is less precise.
+
+
+8. Ports
+--------
+
+The rule permits:
+
+UDP/53
+TCP/53
+
+UDP handles most DNS queries.
+
+TCP is also allowed because DNS may fall back to TCP for larger responses.
+
+
+9. Full rule in plain English
+-----------------------------
+
+HavenBridge API Pods may contact Pods labelled k8s-app=kube-dns inside the
+kube-system namespace, only on UDP port 53 and TCP port 53.
+
+
+10. Most important distinction
+------------------------------
+
+Top-level spec.podSelector:
+Which Pods does this policy protect?
+
+egress.to.podSelector:
+Which destination Pods may those protected Pods contact?
+
+namespaceSelector:
+Which namespace must those destination Pods belong to?

@@ -1,0 +1,508 @@
+from pathlib import Path
+
+content = """HavenBridge Kubernetes Resources Explained
+===========================================
+
+This note explains the difference between Pods, Services, Deployments,
+ReplicaSets, StatefulSets, and headless Services in the HavenBridge platform.
+
+Current HavenBridge Resources
+-----------------------------
+
+Command:
+
+kubectl -n havenbridge get all
+
+Observed resources:
+
+Pods
+----
+- havenbridge-api-554c86f6d5-8dhtp
+- havenbridge-api-554c86f6d5-cdhd5
+- havenbridge-postgres-0
+
+Services
+--------
+- havenbridge-api
+- havenbridge-postgres
+- havenbridge-postgres-headless
+
+Deployment
+----------
+- havenbridge-api
+
+ReplicaSets
+-----------
+- havenbridge-api-54945d4f88
+- havenbridge-api-554c86f6d5
+- havenbridge-api-6cc8b6557b
+- havenbridge-api-c47c6745c
+
+StatefulSet
+-----------
+- havenbridge-postgres
+
+
+1. Pod: Where the Application Actually Runs
+--------------------------------------------
+
+A Pod is the smallest runnable unit in Kubernetes. A Pod contains one or more
+containers.
+
+In HavenBridge:
+
+- The HavenBridge API Pods run the FastAPI application container.
+- The PostgreSQL Pod runs the PostgreSQL database container.
+
+Examples:
+
+pod/havenbridge-api-554c86f6d5-8dhtp
+pod/havenbridge-api-554c86f6d5-cdhd5
+pod/havenbridge-postgres-0
+
+A Pod has its own IP address, but that address is temporary.
+
+Example:
+
+API Pod deleted
+      |
+      v
+Kubernetes creates a replacement Pod
+      |
+      v
+Replacement Pod receives a different IP address
+
+Applications should normally not connect directly to Pod IP addresses because
+those IP addresses can change after a Pod restart or replacement.
+
+
+Why the API and PostgreSQL Pod Names Look Different
+---------------------------------------------------
+
+The API Pods have generated names:
+
+havenbridge-api-554c86f6d5-8dhtp
+havenbridge-api-554c86f6d5-cdhd5
+
+These Pods are created by a Deployment through a ReplicaSet. They are designed
+to be replaceable.
+
+PostgreSQL has a stable, predictable name:
+
+havenbridge-postgres-0
+
+That Pod is created by a StatefulSet. StatefulSet Pod names remain predictable.
+
+
+2. Service: The Stable Network Address
+--------------------------------------
+
+A Service provides a stable DNS name and virtual IP address for one or more
+Pods.
+
+HavenBridge Services:
+
+service/havenbridge-api
+service/havenbridge-postgres
+service/havenbridge-postgres-headless
+
+Pods can be deleted and recreated, but the Service name and ClusterIP remain
+stable.
+
+Without a Service:
+
+API
+  |
+  v
+Must know the PostgreSQL Pod IP
+  |
+  v
+PostgreSQL Pod restarts
+  |
+  v
+Pod IP changes
+  |
+  v
+API connection breaks
+
+With a Service:
+
+API
+  |
+  v
+havenbridge-postgres:5432
+  |
+  v
+Service finds the current PostgreSQL Pod
+
+The Service gives applications a reliable connection point.
+
+
+HavenBridge API Service
+-----------------------
+
+Resource:
+
+service/havenbridge-api
+
+ClusterIP:
+
+10.109.62.24
+
+Service port:
+
+80/TCP
+
+The API container listens on port 8000. The Service receives traffic on port 80
+and forwards it to the selected API Pods on port 8000.
+
+Traffic flow:
+
+Traefik
+   |
+   v
+havenbridge-api Service:80
+   |
+   v
+HavenBridge API Pods:8000
+
+The Service selects both healthy API replicas and can send traffic to either
+one.
+
+This provides:
+
+- stable DNS;
+- a stable ClusterIP;
+- load distribution;
+- continued service when one API Pod is unavailable.
+
+
+HavenBridge PostgreSQL Service
+------------------------------
+
+Resource:
+
+service/havenbridge-postgres
+
+ClusterIP:
+
+10.102.178.240
+
+Service port:
+
+5432/TCP
+
+The HavenBridge API normally connects through:
+
+havenbridge-postgres:5432
+
+Traffic flow:
+
+HavenBridge API
+       |
+       v
+havenbridge-postgres Service:5432
+       |
+       v
+havenbridge-postgres-0:5432
+
+The API does not need to know the PostgreSQL Pod IP.
+
+
+PostgreSQL Headless Service
+---------------------------
+
+Resource:
+
+service/havenbridge-postgres-headless
+
+ClusterIP:
+
+None
+
+A headless Service does not provide a virtual ClusterIP. Instead, it provides
+DNS records that identify StatefulSet Pods directly.
+
+A stable PostgreSQL Pod DNS identity can look like:
+
+havenbridge-postgres-0.havenbridge-postgres-headless.havenbridge.svc.cluster.local
+
+The regular PostgreSQL Service answers:
+
+"Where can I reach the PostgreSQL application?"
+
+The headless Service answers:
+
+"What is the network identity of this specific StatefulSet Pod?"
+
+For the HavenBridge API, the regular PostgreSQL Service is normally used. The
+headless Service supports the stable identity expected by the StatefulSet.
+
+
+3. StatefulSet: Manages Stateful Pods
+-------------------------------------
+
+Resource:
+
+statefulset.apps/havenbridge-postgres
+
+A StatefulSet manages applications that require:
+
+- stable Pod names;
+- stable network identity;
+- persistent storage;
+- predictable ordering.
+
+The StatefulSet manages:
+
+pod/havenbridge-postgres-0
+
+
+Stable Pod Name
+---------------
+
+The PostgreSQL Pod is named:
+
+havenbridge-postgres-0
+
+If the Pod is deleted, the StatefulSet creates another Pod with the same name.
+
+
+Stable Storage Relationship
+---------------------------
+
+HavenBridge PostgreSQL storage flow:
+
+PostgreSQL StatefulSet
+        |
+        v
+volumeClaimTemplates
+        |
+        v
+PVC created automatically
+        |
+        v
+havenbridge-nfs StorageClass
+        |
+        v
+NFS-backed PersistentVolume
+
+If the PostgreSQL Pod is replaced:
+
+Old PostgreSQL Pod deleted
+        |
+        v
+New havenbridge-postgres-0 created
+        |
+        v
+Existing PVC mounted again
+        |
+        v
+Existing database files remain available
+
+The Pod can be replaced while the persistent data remains.
+
+
+Ordered Identity
+----------------
+
+With multiple StatefulSet replicas, Pods are normally numbered:
+
+havenbridge-postgres-0
+havenbridge-postgres-1
+havenbridge-postgres-2
+
+Each Pod has a predictable identity and normally its own persistent storage.
+
+
+StatefulSet Versus Pod
+----------------------
+
+A Pod runs PostgreSQL. The StatefulSet manages that Pod.
+
+StatefulSet
+    |
+    v
+Creates and watches the PostgreSQL Pod
+    |
+    v
+PostgreSQL Pod runs the PostgreSQL container
+
+If the PostgreSQL Pod is manually deleted, the StatefulSet detects that the
+desired replica is missing and creates a replacement.
+
+Without a controller, deleting a standalone Pod would remove the running
+workload until someone recreated it manually.
+
+
+Why PostgreSQL Uses a StatefulSet Instead of a Deployment
+---------------------------------------------------------
+
+Deployments are best suited to stateless, replaceable workloads.
+
+The HavenBridge API can use a Deployment because either healthy API replica can
+process a request.
+
+Request arrives
+    |
+    v
+Either API replica can process it
+
+PostgreSQL is different because it stores persistent database files.
+
+PostgreSQL Pod
+    |
+    v
+Database files
+    |
+    v
+Data must survive Pod replacement
+
+Therefore:
+
+HavenBridge API -> Deployment
+PostgreSQL      -> StatefulSet
+
+
+4. Deployment: Manages Stateless API Pods
+-----------------------------------------
+
+Resource:
+
+deployment.apps/havenbridge-api
+
+The Deployment declares:
+
+"I want two HavenBridge API Pods running."
+
+Kubernetes currently maintains two API replicas.
+
+If one API Pod fails:
+
+API Pod fails
+    |
+    v
+Deployment detects that only one replica remains
+    |
+    v
+Deployment creates a replacement Pod
+    |
+    v
+Replica count returns to two
+
+The Deployment is the high-level controller for the API workload.
+
+
+5. ReplicaSet: Maintains a Deployment Revision
+----------------------------------------------
+
+The Deployment creates and manages ReplicaSets.
+
+Current active ReplicaSet:
+
+havenbridge-api-554c86f6d5
+
+The matching API Pods include the same ReplicaSet hash:
+
+ReplicaSet:
+havenbridge-api-554c86f6d5
+
+Pods:
+havenbridge-api-554c86f6d5-8dhtp
+havenbridge-api-554c86f6d5-cdhd5
+
+Management chain:
+
+Deployment
+    |
+    v
+ReplicaSet
+    |
+    v
+API Pods
+
+Older ReplicaSets have zero desired replicas. Kubernetes retains them to support
+rollout history and rollback.
+
+
+6. Complete HavenBridge Relationship
+------------------------------------
+
+External user
+      |
+      v
+MetalLB IP: 172.16.10.40
+      |
+      v
+Traefik
+      |
+      v
+havenbridge-api Service:80
+      |
+      v
+Two HavenBridge API Pods:8000
+      |
+      v
+havenbridge-postgres Service:5432
+      |
+      v
+PostgreSQL StatefulSet Pod
+      |
+      v
+PersistentVolumeClaim
+      |
+      v
+NFS-backed persistent storage
+
+
+7. Simple Comparison
+--------------------
+
+Pod
+- Runs the actual container.
+- Example: HavenBridge API Pod or PostgreSQL Pod.
+
+Service
+- Provides stable DNS and networking.
+- Example: havenbridge-api or havenbridge-postgres.
+
+Deployment
+- Manages replaceable, stateless Pods.
+- Example: havenbridge-api.
+
+ReplicaSet
+- Maintains one Deployment revision and the required number of Pods.
+- Example: havenbridge-api-554c86f6d5.
+
+StatefulSet
+- Manages stateful Pods with stable identity and persistent storage.
+- Example: havenbridge-postgres.
+
+Headless Service
+- Provides direct stable DNS identities for StatefulSet Pods.
+- Example: havenbridge-postgres-headless.
+
+
+Most Important Distinction
+--------------------------
+
+Pod
+= Where the container runs.
+
+Service
+= How other workloads reliably reach the Pods.
+
+Deployment
+= How Kubernetes manages replaceable stateless Pods.
+
+StatefulSet
+= How Kubernetes manages stateful Pods with stable identity and storage.
+
+ReplicaSet
+= The Deployment revision that maintains the required number of API Pods.
+"""
+
+output_path = Path("/mnt/data/havenbridge-kubernetes-resources-explained.txt")
+output_path.write_text(content, encoding="utf-8")
+print(output_path)
+
