@@ -131,6 +131,247 @@ The five virtual machines run on a Dell Precision 5810 host using KVM and libvir
 
 The three control-plane nodes provide a stacked-etcd quorum. kube-vip exposes the shared Kubernetes API endpoint at `172.16.10.30`, while application workloads are scheduled primarily on the two worker nodes.
 
+
+## End-to-End HavenBridge HTTP Request Flow
+
+The following flow shows how an external HTTP request travels from a client on
+the home-lab network through the Kubernetes platform until it reaches the
+HavenBridge FastAPI application.
+
+```text
+curl http://havenbridge.lab
+        |
+        | DNS lookup
+        v
+havenbridge.lab = 172.16.10.40
+        |
+        | HTTP defaults to TCP/80
+        v
+172.16.10.40:80
+        |
+        | MetalLB makes this LoadBalancer IP reachable
+        v
+Traefik LoadBalancer Service
+        |
+        | Service port 80
+        v
+Traefik web entrypoint
+        |
+        | internal port 8000
+        v
+Gateway listener: web
+        |
+        | hostname = havenbridge.lab
+        v
+HTTPRoute
+        |
+        | backend = havenbridge-api:80
+        v
+havenbridge-api ClusterIP Service
+        |
+        | Service port 80
+        | targetPort = http
+        v
+EndpointSlice
+        |
+        | selects a Ready API Pod endpoint
+        v
+HavenBridge API Pod
+        |
+        | container port 8000
+        v
+FastAPI
+```
+
+### What Each Layer Does
+
+The request begins with the hostname:
+
+```text
+havenbridge.lab
+```
+
+which resolves to the MetalLB-provided application address:
+
+```text
+172.16.10.40
+```
+
+Because the client uses `http://` without specifying a port, it connects to the
+standard HTTP port:
+
+```text
+TCP/80
+```
+
+MetalLB makes `172.16.10.40` reachable on the home-lab network and assigns that
+address to the Traefik `LoadBalancer` Service.
+
+Traefik receives the request through its externally exposed HTTP Service port
+`80`. Internally, this traffic reaches Traefik's `web` entrypoint on port
+`8000`.
+
+The Gateway listener accepts HTTP traffic for:
+
+```text
+havenbridge.lab
+```
+
+The `HTTPRoute` then determines which Kubernetes backend should receive that
+request. For HavenBridge, the selected backend is:
+
+```text
+havenbridge-api Service
+port 80
+```
+
+The `havenbridge-api` Service provides a stable internal endpoint for the API
+Pods. Its `targetPort` references the named `http` container port, which maps
+to:
+
+```text
+containerPort: 8000
+```
+
+Kubernetes maintains an `EndpointSlice` containing the Ready HavenBridge API
+Pod IP addresses. Only healthy, Ready application endpoints are used for
+normal Service traffic.
+
+The final request therefore reaches the FastAPI application running inside one
+of the HavenBridge API Pods.
+
+### Component Responsibilities
+
+```text
+DNS
+    Resolves havenbridge.lab to 172.16.10.40.
+
+MetalLB
+    Makes the LoadBalancer address 172.16.10.40 reachable on the
+    bare-metal/home-lab network.
+
+Traefik LoadBalancer Service
+    Receives external application traffic on standard ports such as
+    HTTP/80 and HTTPS/443.
+
+Traefik EntryPoint
+    Provides Traefik's internal HTTP or HTTPS listening point.
+
+Gateway
+    Defines which hostnames and protocols Traefik accepts.
+
+HTTPRoute
+    Defines where accepted HTTP requests should be routed.
+
+Kubernetes Service
+    Provides a stable internal network endpoint for the API workload.
+
+EndpointSlice
+    Tracks the Ready Pod IP addresses behind the Service.
+
+HavenBridge API Pod
+    Runs the FastAPI application.
+
+FastAPI
+    Processes the actual HavenBridge application request.
+```
+
+One important detail is that Traefik and the HavenBridge API both currently use
+an internal port numbered `8000`, but these are completely separate ports on
+different Pods:
+
+```text
+Traefik Pod :8000
+        ≠
+HavenBridge API Pod :8000
+```
+
+The Gateway, HTTPRoute, Service and EndpointSlice resources connect these
+separate parts of the request path.
+
+
+
+### Building Analogy
+
+A simple way to remember the HavenBridge request path is to think of the
+platform as an office building.
+
+```text
+havenbridge.lab
+= building name
+
+172.16.10.40
+= building street address
+
+MetalLB
+= makes that street address reachable
+
+Traefik Service port 80
+= public front door
+
+Traefik web entrypoint :8000
+= receptionist's internal desk
+
+Gateway listener
+= receptionist saying:
+  "I accept visitors for havenbridge.lab"
+
+HTTPRoute
+= directory telling the receptionist:
+  "The HavenBridge API is in this department"
+
+havenbridge-api Service
+= department's permanent extension
+
+EndpointSlice
+= list of employees currently available to take the request
+
+API Pod
+= employee actually handling the request
+
+FastAPI
+= the application doing the work
+```
+
+The request can therefore be pictured like this:
+
+```text
+Visitor asks for HavenBridge
+        ↓
+Looks up the building name
+        ↓
+Finds the street address
+172.16.10.40
+        ↓
+Enters through the public front door
+Traefik Service
+        ↓
+Speaks to the receptionist
+Traefik entrypoint / Gateway
+        ↓
+Receptionist checks the directory
+HTTPRoute
+        ↓
+Calls the department's permanent extension
+havenbridge-api Service
+        ↓
+Finds an available employee
+EndpointSlice
+        ↓
+Employee handles the request
+API Pod
+        ↓
+FastAPI performs the application work
+```
+
+This analogy maps directly to the Kubernetes architecture, but the actual
+networking components still perform their specific technical roles described
+in the request-flow section above.
+
+
+
+
+
 ### Persistent storage architecture
 
 ```text
