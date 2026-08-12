@@ -1,0 +1,37 @@
+HavenBridge TLS Phase — cert-manager Installation Validation Steps
+================================================================
+
+Purpose
+-------
+Verify that cert-manager was installed successfully and that its core
+controllers and Custom Resource Definitions (CRDs) are available.
+
+Recommended evidence directory
+------------------------------
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/platform/evidence/tls-validation/
+
+1. Verify cert-manager Pods
+---------------------------
+kubectl get pods   --namespace cert-manager   --output wide
+
+Expected:
+- cert-manager: 1/1 Running
+- cert-manager-cainjector: 1/1 Running
+- cert-manager-webhook: 1/1 Running
+
+2. Verify required CRDs
+-----------------------
+kubectl get crd   certificates.cert-manager.io   issuers.cert-manager.io   clusterissuers.cert-manager.io
+
+Expected:
+All three CRDs exist.
+
+3. Verify Helm release
+----------------------
+helm list   --namespace cert-manager
+
+Expected:
+A deployed cert-manager Helm release for version v1.21.0.
+
+Successful validation confirms that the cluster can now understand and process
+cert-manager Certificate, Issuer, and ClusterIssuer resources.

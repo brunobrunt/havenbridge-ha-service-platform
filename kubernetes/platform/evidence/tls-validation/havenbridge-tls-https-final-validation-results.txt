@@ -1,0 +1,89 @@
+HavenBridge TLS/HTTPS Final Validation Results
+=============================================
+
+Project destination
+-------------------
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/platform/evidence/tls-validation/havenbridge-tls-https-final-validation-results.txt
+
+Validation status
+-----------------
+PASS
+
+HTTP redirect validation
+------------------------
+Command:
+curl -s -o /dev/null -D -   http://havenbridge.lab/health/ready   | grep -Ei '^(HTTP/|Location:)'
+
+Observed:
+HTTP/1.1 301 Moved Permanently
+Location: https://havenbridge.lab/health/ready
+
+Redirect-follow validation
+--------------------------
+Command:
+curl -sS -L   -o /dev/null   -w 'Final URL: %{url_effective}\nHTTP Code: %{http_code}\nRedirects: %{num_redirects}\n'   http://havenbridge.lab/health/ready
+
+Observed:
+Final URL: https://havenbridge.lab/health/ready
+HTTP Code: 200
+Redirects: 1
+
+Previously validated direct HTTPS
+---------------------------------
+Direct HTTPS returned:
+HTTP/2 200
+{"status":"ready"}
+
+Final request behavior
+----------------------
+http://havenbridge.lab/health/ready
+        |
+        | HTTP :80
+        v
+Traefik web :8000
+        |
+        v
+havenbridge-http-redirect HTTPRoute
+        |
+        | 301 Moved Permanently
+        v
+https://havenbridge.lab/health/ready
+        |
+        | HTTPS :443
+        v
+Traefik websecure :8443
+        |
+        | TLS termination
+        | Secret: havenbridge-tls
+        v
+havenbridge-api HTTPRoute
+        |
+        v
+havenbridge-api Service :80
+        |
+        v
+Ready API Pod :8000
+        |
+        v
+FastAPI
+        |
+        v
+HTTP 200
+{"status":"ready"}
+
+Overall conclusion
+------------------
+The HavenBridge TLS/HTTPS implementation is complete.
+
+Validated:
+- cert-manager installation
+- private HavenBridge Root CA
+- CA-backed ClusterIssuer
+- havenbridge.lab server certificate
+- Kubernetes TLS Secret
+- Traefik websecure HTTPS listener
+- TLS termination at Traefik
+- HTTPS HTTPRoute attachment
+- private CA trust on Syrus
+- HTTP to HTTPS permanent redirect
+- end-to-end HTTPS application delivery

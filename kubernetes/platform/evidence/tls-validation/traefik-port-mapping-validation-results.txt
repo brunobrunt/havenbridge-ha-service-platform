@@ -1,0 +1,44 @@
+HavenBridge TLS Phase — Traefik Port Mapping Validation Results
+=================================================================
+
+Validation status: PASS
+
+Observed Service ports
+----------------------
+web        servicePort=80   targetPort=web
+websecure  servicePort=443  targetPort=websecure
+
+Observed Traefik container ports
+--------------------------------
+metrics    containerPort=9100
+traefik    containerPort=8080
+web        containerPort=8000
+websecure  containerPort=8443
+
+Confirmed HTTP path
+-------------------
+External TCP/80
+    ->
+Traefik Service port 80
+    ->
+targetPort web
+    ->
+Traefik container port 8000
+
+Confirmed HTTPS path
+--------------------
+External TCP/443
+    ->
+Traefik Service port 443
+    ->
+targetPort websecure
+    ->
+Traefik container port 8443
+
+Conclusion
+----------
+The existing Traefik LoadBalancer Service is already prepared to receive
+external HTTPS traffic on TCP/443.
+
+No additional MetalLB IP or LoadBalancer Service is required for HavenBridge
+HTTPS.

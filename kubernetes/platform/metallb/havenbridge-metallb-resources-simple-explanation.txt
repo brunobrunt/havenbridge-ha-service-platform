@@ -1,0 +1,341 @@
+HavenBridge MetalLB Resources — Simple Explanation
+==================================================
+
+Purpose
+-------
+
+The `metallb-system` namespace is MetalLB's own workspace.
+
+The resources in this namespace are the components MetalLB needs to give
+Kubernetes `LoadBalancer` Services an external IP address, such as the
+HavenBridge application address:
+
+    172.16.10.40
+
+Simple flow:
+
+    MetalLB Controller
+            ↓
+    chooses/manages external IPs
+            ↓
+    MetalLB Speakers
+            ↓
+    advertise the IP on the local network
+            ↓
+    172.16.10.40 becomes reachable
+            ↓
+    Traefik LoadBalancer Service
+            ↓
+    HavenBridge
+
+
+1. MetalLB Controller Pod
+-------------------------
+
+Example:
+
+    pod/metallb-controller-75f6b7f996-x7jpp
+
+The controller is the manager.
+
+Its job is to watch Kubernetes Services that request:
+
+    type: LoadBalancer
+
+and determine which MetalLB IP address should be assigned.
+
+For HavenBridge:
+
+    Traefik Service
+          ↓
+    172.16.10.40
+
+A simple way to remember it:
+
+    Controller = decides who gets the address
+
+
+2. MetalLB Speaker Pods
+-----------------------
+
+Example speaker Pods:
+
+    metallb-speaker-47l4q
+    metallb-speaker-7mcfc
+    metallb-speaker-94pfb
+    metallb-speaker-hq65h
+    metallb-speaker-mhspw
+
+There are five speaker Pods because the HavenBridge cluster has five
+Kubernetes nodes:
+
+    3 control-plane nodes
+    2 worker nodes
+            =
+    5 Kubernetes nodes
+
+The speaker Pods make the external LoadBalancer address reachable on the
+local network.
+
+HavenBridge uses MetalLB in Layer 2 mode, so the speakers advertise the
+LoadBalancer address on the local network using Layer 2 mechanisms such as
+ARP.
+
+Simple memory hook:
+
+    Controller = decides who gets the address
+
+    Speaker = announces:
+              "172.16.10.40 is reachable through this cluster."
+
+
+3. MetalLB Speaker DaemonSet
+----------------------------
+
+Resource:
+
+    daemonset.apps/metallb-speaker
+
+A Kubernetes DaemonSet means:
+
+    "Run one copy of this Pod on every matching Kubernetes node."
+
+For HavenBridge:
+
+    5 Kubernetes nodes
+           ↓
+    MetalLB speaker DaemonSet
+           ↓
+    5 MetalLB speaker Pods
+
+A healthy output such as:
+
+    DESIRED   5
+    CURRENT   5
+    READY     5
+
+means all five speaker Pods are running successfully.
+
+
+4. MetalLB Controller Deployment
+--------------------------------
+
+Resource:
+
+    deployment.apps/metallb-controller
+
+The Deployment manages the MetalLB controller Pod.
+
+For example:
+
+    Deployment
+        ↓
+    ReplicaSet
+        ↓
+    Controller Pod
+
+If the controller Pod stops, Kubernetes uses the Deployment and ReplicaSet
+to create a replacement.
+
+
+5. MetalLB Controller ReplicaSet
+--------------------------------
+
+Resource:
+
+    replicaset.apps/metallb-controller-75f6b7f996
+
+The ReplicaSet is automatically created by the Deployment.
+
+Its job is to make sure the requested number of controller Pods exists.
+
+For example:
+
+    Controller Pod dies
+           ↓
+    ReplicaSet notices
+           ↓
+    replacement Controller Pod is created
+
+Normally, the ReplicaSet is not managed directly.
+
+
+6. MetalLB Webhook Service
+--------------------------
+
+Resource:
+
+    service/metallb-webhook-service
+
+This is an internal Kubernetes Service used by MetalLB's admission webhook.
+
+When MetalLB configuration is created or changed, Kubernetes can use this
+webhook to validate that the configuration is acceptable.
+
+Typical output:
+
+    TYPE          ClusterIP
+    EXTERNAL-IP   <none>
+    PORT          443/TCP
+
+This is correct.
+
+The webhook Service does not need an external IP because it is used for
+internal Kubernetes communication.
+
+It is NOT the HavenBridge application LoadBalancer address.
+
+
+7. Important MetalLB Resources Not Shown by `kubectl get all`
+-------------------------------------------------------------
+
+The command:
+
+    kubectl -n metallb-system get all
+
+does not show every MetalLB custom resource.
+
+Two especially important resources are:
+
+    IPAddressPool
+    L2Advertisement
+
+View them with:
+
+    kubectl get ipaddresspools.metallb.io       -n metallb-system
+
+    kubectl get l2advertisements.metallb.io       -n metallb-system
+
+
+IPAddressPool
+-------------
+
+The IPAddressPool defines which external IP addresses MetalLB is allowed to
+assign.
+
+Simple meaning:
+
+    IPAddressPool
+        ↓
+    "These external IP addresses are available for MetalLB to use."
+
+
+L2Advertisement
+---------------
+
+The L2Advertisement tells MetalLB to advertise the addresses from the pool
+using Layer 2 networking.
+
+Simple meaning:
+
+    L2Advertisement
+        ↓
+    "Advertise these LoadBalancer IPs on the local network."
+
+
+Complete HavenBridge MetalLB Flow
+---------------------------------
+
+    IPAddressPool
+    "These IPs are available"
+            ↓
+    MetalLB Controller
+    "Assign this IP to this LoadBalancer Service"
+            ↓
+    L2Advertisement
+    "Advertise the IP using Layer 2"
+            ↓
+    MetalLB Speaker Pods
+    "172.16.10.40 is reachable through the cluster"
+            ↓
+    Local network
+            ↓
+    Traefik LoadBalancer Service
+            ↓
+    Gateway API
+            ↓
+    HavenBridge
+
+
+HavenBridge-Specific Result
+---------------------------
+
+For HavenBridge:
+
+    MetalLB
+       ↓
+    172.16.10.40
+       ↓
+    Traefik
+       ↓
+    havenbridge.lab
+
+MetalLB is not the application itself.
+
+MetalLB's job is to make the external application IP reachable on the
+homelab network. Traefik then receives the traffic and performs the
+application-level HTTP/HTTPS routing.
+
+
+Quick Interview Explanation
+---------------------------
+
+If asked what the main MetalLB components do:
+
+    Controller:
+        Assigns/manages LoadBalancer IP addresses.
+
+    Speaker:
+        Advertises those IP addresses on the network.
+
+    DaemonSet:
+        Ensures a speaker Pod runs on each matching node.
+
+    Deployment:
+        Manages the MetalLB controller Pod.
+
+    ReplicaSet:
+        Ensures the required controller replica exists.
+
+    Webhook Service:
+        Provides internal validation for MetalLB configuration.
+
+    IPAddressPool:
+        Defines the external IP addresses MetalLB may allocate.
+
+    L2Advertisement:
+        Tells MetalLB to advertise those addresses using Layer 2.
+
+
+Useful Validation Commands
+--------------------------
+
+Show standard MetalLB namespace resources:
+
+    kubectl -n metallb-system get all
+
+Show the configured address pools:
+
+    kubectl get ipaddresspools.metallb.io       -n metallb-system
+
+Show Layer 2 advertisements:
+
+    kubectl get l2advertisements.metallb.io       -n metallb-system
+
+Show speaker Pods and the nodes they run on:
+
+    kubectl get pods       -n metallb-system       -o wide
+
+Show the Traefik LoadBalancer Service:
+
+    kubectl get service       -n traefik       -o wide
+
+
+Memory Hook
+-----------
+
+    MetalLB Controller = chooses the street address.
+
+    MetalLB Speakers = announce where that street address can be reached.
+
+    Traefik = the front door that receives traffic sent to that address.

@@ -1,0 +1,89 @@
+HavenBridge Traefik — Simple Definitions and Memory Hooks
+=========================================================
+
+Component: MetalLB
+Simple definition:
+Gives LoadBalancer Services a reachable IP address in a bare-metal Kubernetes cluster.
+Memory hook:
+"Gives the building a street address."
+
+Component: Gateway API
+Simple definition:
+Kubernetes standard for defining how external traffic enters the cluster and reaches applications.
+Memory hook:
+"The traffic-routing rulebook."
+
+Component: GatewayClass
+Simple definition:
+Defines which controller, such as Traefik, is responsible for implementing a Gateway.
+Memory hook:
+"Chooses who manages the front door."
+
+Component: Gateway
+Simple definition:
+Defines the actual entry point into the cluster and the listeners that accept traffic.
+Memory hook:
+"The building entrance."
+
+Component: Listeners
+Simple definition:
+Define what traffic a Gateway accepts, such as HTTP or HTTPS, hostname, and port.
+Memory hook:
+"The receptionist saying what visitors I accept."
+
+Component: Entrypoints
+Simple definition:
+Traefik's named internal network ports where it listens for traffic, such as web:8000 and websecure:8443.
+Memory hook:
+"The receptionist's internal desks."
+
+Component: HTTPRoute
+Simple definition:
+Defines where matching HTTP requests should be sent after entering through a Gateway.
+Memory hook:
+"The building directory."
+
+Component: Service
+Simple definition:
+Gives a group of Pods a stable network name and IP, even when individual Pods are replaced.
+Memory hook:
+"The department's permanent extension."
+
+Component: EndpointSlice
+Simple definition:
+Keeps the current list of Pod IPs that are available behind a Service.
+Memory hook:
+"The list of employees currently available."
+
+Component: TLS termination
+Simple definition:
+The point where encrypted HTTPS traffic is decrypted. In HavenBridge, Traefik terminates TLS.
+Memory hook:
+"The secure receptionist checks the visitor and opens the sealed message."
+
+Component: HTTP -> HTTPS redirect
+Simple definition:
+Tells clients using insecure HTTP to reconnect using encrypted HTTPS instead.
+Memory hook:
+"Use the secure entrance instead."
+
+Component: High availability
+Simple definition:
+Designing the service so it can keep working when one component or node fails.
+Memory hook:
+"Don't depend on only one copy."
+
+Component: PDB — PodDisruptionBudget
+Simple definition:
+Controls how many Pods must remain available during voluntary disruptions such as a node drain.
+Memory hook:
+"Don't voluntarily remove too many workers at once."
+
+Component: Anti-affinity
+Simple definition:
+Scheduling rule that keeps replicas apart, usually on different nodes, so one node failure does not remove every replica.
+Memory hook:
+"Don't put all your workers in the same room."
+
+Anti-affinity helps protect against where Pods are placed;
+A PDB helps protect how many Pods can be voluntarily disrupted at once.

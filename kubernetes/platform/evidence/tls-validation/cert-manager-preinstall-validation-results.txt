@@ -1,0 +1,28 @@
+HavenBridge TLS Phase — cert-manager Pre-Installation Validation Results
+====================================================================
+
+Validation status: PASS
+
+Observed namespace result
+-------------------------
+Error from server (NotFound): namespaces "cert-manager" not found
+
+Observed Pod result
+-------------------
+No resources found in cert-manager namespace.
+
+Observed CRD results
+--------------------
+certificates.cert-manager.io: NotFound
+issuers.cert-manager.io: NotFound
+clusterissuers.cert-manager.io: NotFound
+
+Conclusion
+----------
+cert-manager is not currently installed in the HavenBridge Kubernetes cluster.
+
+No cert-manager namespace exists.
+No cert-manager controller Pods exist.
+No cert-manager Certificate, Issuer, or ClusterIssuer CRDs exist.
+
+The cluster is therefore ready for a first-time cert-manager installation.

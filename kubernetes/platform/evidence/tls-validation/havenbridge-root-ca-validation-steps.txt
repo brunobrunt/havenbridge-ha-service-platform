@@ -1,0 +1,28 @@
+HavenBridge TLS Phase — Root CA Validation Steps
+================================================
+
+Purpose
+-------
+Validate that the HavenBridge Root CA certificate was issued successfully and
+that cert-manager created the backing TLS Secret.
+
+Recommended evidence directory
+------------------------------
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/platform/evidence/tls-validation/
+
+1. Validate the Certificate
+---------------------------
+kubectl get certificate havenbridge-root-ca   --namespace cert-manager   --output wide
+
+Expected:
+- READY=True
+- SECRET=havenbridge-root-ca
+- ISSUER=havenbridge-selfsigned
+
+2. Validate the Secret
+----------------------
+kubectl get secret havenbridge-root-ca   --namespace cert-manager   --output wide
+
+Expected:
+- TYPE=kubernetes.io/tls
+- Secret exists in cert-manager namespace

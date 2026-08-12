@@ -1,0 +1,27 @@
+HavenBridge TLS Phase — cert-manager Pre-Installation Validation Steps
+==================================================================
+
+Purpose
+-------
+Confirm whether cert-manager already exists in the HavenBridge Kubernetes cluster
+before installing certificate-management components.
+
+Recommended evidence directory
+------------------------------
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/platform/evidence/tls-validation/
+
+Commands
+--------
+kubectl get namespace cert-manager 2>&1 || true
+
+kubectl get pods   --namespace cert-manager 2>&1 || true
+
+kubectl get crd   certificates.cert-manager.io   issuers.cert-manager.io   clusterissuers.cert-manager.io 2>&1 || true
+
+Interpretation
+--------------
+If the namespace, Pods, and CRDs are all missing, cert-manager is not installed.
+
+This check prevents accidentally installing cert-manager twice, which is
+important because cert-manager manages cluster-scoped CRDs and should be
+installed only once per cluster.

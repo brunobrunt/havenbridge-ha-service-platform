@@ -1,0 +1,46 @@
+HavenBridge TLS Phase — Live Gateway HTTPS Listener Validation Steps
+=================================================================
+
+Purpose
+-------
+Validate the live Traefik Gateway after the Helm upgrade that added the HTTPS
+listener and TLS certificate reference.
+
+Recommended evidence directory
+------------------------------
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/platform/evidence/tls-validation/
+
+Command
+-------
+kubectl describe gateway havenbridge-gateway   --namespace traefik
+
+Validation criteria
+-------------------
+Gateway:
+- Accepted=True
+- Programmed=True
+- Address=172.16.10.40
+
+HTTP listener:
+- name=web
+- protocol=HTTP
+- port=8000
+- hostname=havenbridge.lab
+- Attached Routes=1
+- Accepted=True
+- ResolvedRefs=True
+- Programmed=True
+
+HTTPS listener:
+- name=websecure
+- protocol=HTTPS
+- port=8443
+- hostname=havenbridge.lab
+- TLS mode=Terminate
+- certificateRef Secret=havenbridge-tls
+- Accepted=True
+- ResolvedRefs=True
+- Programmed=True
+
+At this stage, Attached Routes=0 for websecure is expected because the existing
+HTTPRoute currently targets the listener named web.

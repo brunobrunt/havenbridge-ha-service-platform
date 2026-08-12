@@ -1,0 +1,21 @@
+HavenBridge TLS Phase — Traefik Port Mapping Validation Steps
+================================================================
+
+Purpose
+-------
+Verify how external HTTP/HTTPS Service ports map to Traefik container ports
+before configuring TLS.
+
+Recommended evidence directory
+------------------------------
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/platform/evidence/tls-validation/
+
+Validation goal
+---------------
+Confirm:
+
+HTTP:
+Traefik Service port 80 -> targetPort web -> containerPort 8000
+
+HTTPS:
+Traefik Service port 443 -> targetPort websecure -> containerPort 8443

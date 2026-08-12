@@ -1,0 +1,52 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: havenbridge-root-ca
+  namespace: cert-manager
+  labels:
+    app.kubernetes.io/part-of: havenbridge
+    app.kubernetes.io/component: tls
+spec:
+  # The Kubernetes Secret where cert-manager will store
+  # the Root CA certificate and its private key.
+  secretName: havenbridge-root-ca
+
+  # This certificate is a Certificate Authority rather
+  # than a normal server/application certificate.
+  isCA: true
+
+  # Human-readable identity of the Root CA.
+  commonName: HavenBridge Root CA
+
+  subject:
+    organizations:
+      - HavenBridge
+
+  # Long-lived Root CA for the private HavenBridge lab PKI.
+  # 87600 hours = 10 years.
+  duration: 87600h
+
+  # Start renewal attempts one year before expiration.
+  renewBefore: 8760h
+
+  privateKey:
+    algorithm: RSA
+    size: 4096
+
+    # Keep the Root CA private key stable during certificate
+    # reissuance. Root CA key rotation should be performed
+    # deliberately because changing the trust anchor affects
+    # every certificate/client that relies on it.
+    rotationPolicy: Never
+
+  # A CA needs certificate-signing capabilities.
+  usages:
+    - cert sign
+    - crl sign
+
+  # Use the bootstrap SelfSigned ClusterIssuer that we
+  # created in the previous step.
+  issuerRef:
+    name: havenbridge-selfsigned
+    kind: ClusterIssuer
+    group: cert-manager.io

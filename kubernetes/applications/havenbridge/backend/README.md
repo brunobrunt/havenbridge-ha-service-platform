@@ -2497,3 +2497,262 @@ Validated controls include:
 * blocked unauthorized PostgreSQL access;
 * successful application operation after network isolation;
 * successful cleanup of temporary validation resources.
+
+
+
+## Current External Routing and TLS Status
+
+> **Current-state note:** Earlier sections of this README contain HTTP-based
+> validation performed before the HavenBridge TLS phase was completed. Those
+> results are retained as historical implementation evidence. The current
+> external architecture redirects HTTP traffic to HTTPS and serves the
+> HavenBridge application through the Traefik `websecure` listener.
+
+### Current Backend Manifests
+
+The HavenBridge backend currently uses:
+
+```text
+configmap.yaml
+deployment.yaml
+service.yaml
+httproute.yaml
+httproute-http-redirect.yaml
+pdb.yaml
+networkpolicy.yaml
+networkpolicy-egress.yaml
+networkpolicy-postgres-ingress.yaml
+```
+
+The manifests collectively provide:
+
+```text
+Application configuration
+        ↓
+FastAPI Deployment
+        ↓
+ClusterIP Service
+        ↓
+HTTPS Gateway API routing
+        ↓
+HTTP-to-HTTPS redirect
+        ↓
+PodDisruptionBudget
+        ↓
+NetworkPolicy security
+```
+
+### Current HTTP Behaviour
+
+Plain HTTP no longer serves the HavenBridge API directly.
+
+Requests arriving through:
+
+```text
+http://havenbridge.lab
+```
+
+follow this path:
+
+```text
+Client
+   ↓
+havenbridge.lab
+   ↓
+172.16.10.40
+   ↓
+MetalLB
+   ↓
+Traefik Service :80
+   ↓
+web:8000
+   ↓
+Gateway HTTP listener
+   ↓
+havenbridge-http-redirect HTTPRoute
+   ↓
+301 Moved Permanently
+   ↓
+HTTPS
+```
+
+The redirect was validated as:
+
+```text
+HTTP/1.1 301 Moved Permanently
+Location: https://havenbridge.lab/health/ready
+```
+
+The redirect manifest is:
+
+```text
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/httproute-http-redirect.yaml
+```
+
+### Current HTTPS Behaviour
+
+HTTPS is now the application-serving path.
+
+```text
+https://havenbridge.lab
+        ↓
+172.16.10.40
+        ↓
+MetalLB
+        ↓
+Traefik LoadBalancer Service :443
+        ↓
+websecure:8443
+        ↓
+Gateway HTTPS listener
+        ↓
+TLS termination
+        ↓
+havenbridge-api HTTPRoute
+        ↓
+havenbridge-api Service :80
+        ↓
+EndpointSlice
+        ↓
+Ready API Pod :8000
+        ↓
+FastAPI
+```
+
+The application HTTPS route is defined in:
+
+```text
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/httproute.yaml
+```
+
+### TLS Termination
+
+TLS terminates at Traefik.
+
+The client communicates with Traefik using encrypted HTTPS:
+
+```text
+Client
+   ↕
+HTTPS / TLS
+   ↕
+Traefik
+```
+
+Traefik uses the Kubernetes TLS Secret:
+
+```text
+havenbridge-tls
+```
+
+to present the certificate for:
+
+```text
+havenbridge.lab
+```
+
+After TLS termination, Traefik routes the request internally to the
+`havenbridge-api` Service.
+
+Detailed TLS and private-PKI documentation is maintained at:
+
+```text
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/platform/tls/README.md
+```
+
+Detailed Traefik and Gateway API documentation is maintained at:
+
+```text
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/platform/traefik/README.md
+```
+
+### Final End-to-End Validation
+
+The HTTP redirect was validated with:
+
+```text
+HTTP/1.1 301 Moved Permanently
+Location: https://havenbridge.lab/health/ready
+```
+
+Following the redirect produced:
+
+```text
+Final URL: https://havenbridge.lab/health/ready
+HTTP Code: 200
+Redirects: 1
+```
+
+Direct HTTPS validation produced:
+
+```text
+HTTP/2 200
+{"status":"ready"}
+```
+
+The final production-style request path is therefore:
+
+```text
+HTTP request
+     ↓
+301 HTTPS redirect
+     ↓
+HTTPS :443
+     ↓
+TLS termination at Traefik
+     ↓
+Gateway API
+     ↓
+HTTPRoute
+     ↓
+havenbridge-api Service
+     ↓
+EndpointSlice
+     ↓
+Ready API Pod
+     ↓
+FastAPI
+     ↓
+HTTP 200
+```
+
+### Current Backend Security and Availability
+
+The HavenBridge backend currently combines:
+
+```text
+2 API replicas
+        +
+topology spreading
+        +
+PodDisruptionBudget
+        +
+readiness and liveness probes
+        +
+non-root container execution
+        +
+read-only root filesystem
+        +
+NetworkPolicy
+        +
+HTTPS
+        +
+HTTP-to-HTTPS redirect
+```
+
+Together, these controls provide application availability, workload isolation,
+secure external access and controlled Kubernetes networking.
+
+### Validation Evidence
+
+Backend validation evidence is maintained under:
+
+```text
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/applications/havenbridge/backend/evidence/
+```
+
+TLS validation evidence is maintained under:
+
+```text
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/platform/evidence/tls-validation/
+```

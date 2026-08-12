@@ -1,0 +1,64 @@
+HavenBridge TLS Phase — End-to-End HTTPS Validation Results
+===========================================================
+
+Validation status: PASS
+
+DNS
+---
+havenbridge.lab -> 172.16.10.40
+
+TCP
+---
+Connected to havenbridge.lab (172.16.10.40) on port 443.
+
+TLS
+---
+Protocol: TLSv1.3
+Cipher: TLS_AES_128_GCM_SHA256
+ALPN: h2
+Server certificate issuer:
+O=HavenBridge
+CN=HavenBridge Root CA
+
+Certificate verification:
+unable to get local issuer certificate
+Expected at this stage because Syrus does not yet trust the private CA.
+curl continued only because -k was used.
+
+HTTP
+----
+Protocol: HTTP/2
+Request: GET /health/ready
+Status: HTTP/2 200
+Server: uvicorn
+Response:
+{"status":"ready"}
+
+Conclusion
+----------
+The HavenBridge HTTPS path works end-to-end:
+
+Syrus
+  ->
+havenbridge.lab
+  ->
+172.16.10.40:443
+  ->
+Traefik websecure:8443
+  ->
+TLS termination using havenbridge-tls
+  ->
+HTTPRoute
+  ->
+havenbridge-api Service
+  ->
+API Pod
+  ->
+FastAPI /health/ready
+  ->
+HTTP 200
+
+TLS routing and application delivery are working correctly.
+
+The remaining TLS task is to install the HavenBridge Root CA into Syrus's
+trusted CA store so HTTPS succeeds without curl -k.

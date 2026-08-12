@@ -1,0 +1,27 @@
+HavenBridge TLS Phase — HTTP to HTTPS Redirect Validation Steps
+================================================================
+
+Purpose
+-------
+Verify that requests arriving over HTTP are permanently redirected to HTTPS.
+
+Project destination
+-------------------
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/platform/evidence/tls-validation/
+
+Commands
+--------
+curl -vi http://havenbridge.lab/health/ready
+
+Optional redirect-follow validation:
+curl -iL http://havenbridge.lab/health/ready
+
+Validation criteria
+-------------------
+Initial HTTP response:
+- HTTP/1.1 301 Moved Permanently
+- Location: https://havenbridge.lab/health/ready
+
+Redirect-follow result:
+- HTTPS request ultimately returns HTTP 200
+- Response body: {"status":"ready"}

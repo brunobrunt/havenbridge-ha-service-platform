@@ -1,0 +1,9 @@
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: havenbridge-selfsigned
+  labels:
+    app.kubernetes.io/part-of: havenbridge
+    app.kubernetes.io/component: tls
+spec:
+  selfSigned: {}

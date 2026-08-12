@@ -1,7 +1,7 @@
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
-  name: havenbridge-api
+  name: havenbridge-http-redirect
   namespace: havenbridge
   labels:
     app.kubernetes.io/name: havenbridge-api
@@ -9,29 +9,18 @@ metadata:
     app.kubernetes.io/part-of: havenbridge
 spec:
   parentRefs:
-#   - group: gateway.networking.k8s.io
-#     kind: Gateway
-#     name: havenbridge-gateway
-#     namespace: traefik
-#     sectionName: web
     - group: gateway.networking.k8s.io
       kind: Gateway
       name: havenbridge-gateway
       namespace: traefik
-      sectionName: websecure
+      sectionName: web
 
   hostnames:
     - havenbridge.lab
 
   rules:
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /
-
-      backendRefs:
-        - group: ""
-          kind: Service
-          name: havenbridge-api
-          port: 80
-          weight: 1
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301

@@ -1,0 +1,42 @@
+HavenBridge TLS Phase — cert-manager Installation Validation Results
+==================================================================
+
+Validation status: PASS
+
+Observed Pods
+-------------
+cert-manager-6c8f88f5b9-m8kzs
+READY: 1/1
+STATUS: Running
+NODE: eph-worker02
+IP: 10.244.176.230
+
+cert-manager-cainjector-8577b58487-2jrwm
+READY: 1/1
+STATUS: Running
+NODE: eph-worker02
+IP: 10.244.176.229
+
+cert-manager-webhook-7c7694dfd-q66vq
+READY: 1/1
+STATUS: Running
+NODE: eph-worker02
+IP: 10.244.176.228
+
+Observed CRDs
+-------------
+certificates.cert-manager.io
+issuers.cert-manager.io
+clusterissuers.cert-manager.io
+
+Created:
+2026-08-09T04:49:02Z
+
+Conclusion
+----------
+cert-manager is installed successfully.
+
+The controller, CA injector, and webhook are all Running and Ready.
+
+The Kubernetes API now recognizes the Certificate, Issuer, and ClusterIssuer
+resource types required for the HavenBridge TLS certificate workflow.

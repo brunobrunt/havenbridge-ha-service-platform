@@ -1,0 +1,29 @@
+HavenBridge TLS Phase — Root CA Validation Results
+==================================================
+
+Validation status: PASS
+
+Certificate
+-----------
+NAME: havenbridge-root-ca
+READY: True
+SECRET: havenbridge-root-ca
+ISSUER: havenbridge-selfsigned
+STATUS: Certificate is up to date and has not expired
+
+Secret
+------
+NAME: havenbridge-root-ca
+TYPE: kubernetes.io/tls
+DATA: 3
+NAMESPACE: cert-manager
+
+Conclusion
+----------
+The HavenBridge Root CA was issued successfully.
+
+cert-manager stored the Root CA material in the kubernetes.io/tls Secret
+named havenbridge-root-ca in the cert-manager namespace.
+
+This Secret is now ready to be referenced by the HavenBridge CA
+ClusterIssuer.

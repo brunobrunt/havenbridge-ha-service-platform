@@ -5,14 +5,53 @@ route, secure and persist the HavenBridge application.
 
 ## Components
 
-- MetalLB for bare-metal LoadBalancer services
-- Traefik Proxy for application traffic
-- Kubernetes Gateway API for routing
-- Persistent storage for stateful workloads
-- TLS and certificate management
+The HavenBridge Kubernetes platform currently includes:
 
-The Kubernetes API VIP and application gateway address are intentionally
-separate.
+- kube-vip for the highly available Kubernetes API virtual IP
+- Calico for Kubernetes pod networking and NetworkPolicy enforcement
+- MetalLB for bare-metal `LoadBalancer` services
+- Traefik Proxy for HTTP and HTTPS application traffic
+- Kubernetes Gateway API for application routing
+- cert-manager for certificate lifecycle management
+- A private HavenBridge certificate authority for internal TLS
+- NFS-backed persistent storage for stateful workloads
+- PostgreSQL persistent storage integration
+
+Each component solves a different platform requirement:
+
+```text
+kube-vip
+    ↓
+Highly available Kubernetes API endpoint
+
+Calico
+    ↓
+Pod networking and NetworkPolicy
+
+MetalLB
+    ↓
+Reachable application LoadBalancer IP
+
+Traefik
+    ↓
+Application reverse proxy
+
+Gateway API
+    ↓
+HTTP/HTTPS routing
+
+cert-manager
+    ↓
+Certificate lifecycle automation
+
+Private PKI
+    ↓
+TLS trust for havenbridge.lab
+
+NFS CSI
+    ↓
+Dynamic persistent storage
+
 
 ## Network Addresses
 
@@ -25,6 +64,32 @@ separate.
 
 The Kubernetes API VIP and application gateway address are intentionally
 separate.
+
+
+## Application Traffic Architecture
+
+HavenBridge uses MetalLB, Traefik and Kubernetes Gateway API together to expose
+the application.
+
+The application hostname is:
+
+```text
+havenbridge.lab
+
+## HTTP and HTTPS Traffic
+HTTP 80 → web:8000
+    redirect behavior
+    HTTPS 443 → websecure:8443
+    secure request flow
+
+## TLS and Certificate Management
+    cert-manager
+    private Root CA
+    CA ClusterIssuer
+    havenbridge-tls Secret
+    TLS termination
+    links to TLS README
+
 
 ## PostgreSQL Persistent Storage
 
@@ -167,30 +232,33 @@ Detailed command output and evidence are available at:
 ```text
 storage/evidence/postgres-persistence-validation.txt
 ```
+
 ## Application Integration Status
 
-PostgreSQL is running in the `havenbridge` namespace as a StatefulSet with
-NFS-backed persistent storage.
-
-The HavenBridge FastAPI backend has been implemented and packaged as:
+The HavenBridge FastAPI backend is now deployed inside the Kubernetes cluster
+in the:
 
 ```text
-havenbridge-api:0.1.0
+ghcr.io/brunobrunt/havenbridge-api:0.1.0
 ```
 
 The Docker image has been validated with the following checks:
+### Initial Local Docker and PostgreSQL Validation
 
-* The container starts successfully
-* The container runs as the non-root `havenbridge` user
-* The API connects successfully to PostgreSQL
-* SQLAlchemy creates the required application tables
-* The `platform_validation` table exists
-* The `service_inquiries` table exists
+Before the HavenBridge API was deployed into Kubernetes, the Docker image was
+validated with the following checks:
 
-During local validation, the FastAPI container ran on `syrus` while PostgreSQL
-ran inside Kubernetes.
+- The container started successfully.
+- The container ran as the non-root `havenbridge` user.
+- The API connected successfully to PostgreSQL.
+- SQLAlchemy created the required application tables.
+- The `platform_validation` table existed.
+- The `service_inquiries` table existed.
 
-The temporary connection path was:
+During this initial validation, the FastAPI container ran on `syrus` while
+PostgreSQL ran inside Kubernetes.
+
+The temporary validation path was:
 
 ```text
 FastAPI container on syrus
@@ -200,10 +268,19 @@ SSH tunnel
 kubectl port-forward
         ↓
 PostgreSQL Pod in Kubernetes
+
 ```
 
 After the API is deployed inside Kubernetes, it will connect directly to the
 internal PostgreSQL Service. The SSH tunnel will no longer be required.
+
+
+At the Kubernetes workload layer, critical application components use
+replication, scheduling controls and PodDisruptionBudgets where appropriate.
+However, Kubernetes redundancy cannot eliminate the shared physical failure
+domain created by running the virtualized cluster and NFS infrastructure on the
+same physical host.
+
 
 ## Platform Availability Note
 
@@ -218,12 +295,94 @@ while the Kubernetes control plane remains available.
 A complete `syrus` host failure stops both the Kubernetes virtual machines and
 the NFS storage service.
 
+At the Kubernetes workload layer, critical application components use
+replication, scheduling controls and PodDisruptionBudgets where appropriate.
+
+However, Kubernetes redundancy cannot eliminate the shared physical failure
+domain created by running the virtualized cluster and NFS infrastructure on the
+same physical host.
+
 Detailed storage failure, recovery and resilience guidance is documented in:
 
-* [NFS Storage Design and Recovery](storage/README.md)
+- [NFS Storage Design and Recovery](storage/README.md)
+
+
+## Platform Documentation
+
+Detailed component documentation is maintained beside each platform component.
+
+### Traffic Routing
+
+- [Traefik and Gateway API](traefik/README.md)
+
+Covers:
+
+```text
+MetalLB
+Traefik
+Entrypoints
+GatewayClass
+Gateway
+Listeners
+HTTPRoute
+Services
+EndpointSlices
+HTTP-to-HTTPS redirect
+High availability
+Troubleshooting
+```
+
+### TLS and PKI
+
+- [TLS, cert-manager and Private PKI](tls/README.md)
+
+### Persistent Storage
+
+- [NFS Storage Design and Recovery](storage/README.md)
 
 ## Operational Runbooks
 
-* [HavenBridge API and PostgreSQL Validation](runbooks/havenbridge-api-postgresql-validation.txt)
-* [NFS Storage Design and Recovery](storage/README.md)
+- [HavenBridge API and PostgreSQL Validation](runbooks/havenbridge-api-postgresql-validation.txt)
+- [NFS Storage Design and Recovery](storage/README.md)
 
+Validation evidence is maintained under:
+
+```text
+kubernetes/platform/evidence/
+```
+
+including:
+
+```text
+kubernetes/platform/evidence/tls-validation/
+```
+
+## Documentation Hierarchy
+
+```text
+README.md
+│
+└── kubernetes/platform/README.md
+        │
+        ├── traefik/README.md
+        ├── tls/README.md
+        ├── storage/README.md
+        └── runbooks/
+```
+
+The root README provides the overall project story.
+
+The platform README explains how the Kubernetes platform components fit
+together.
+
+The component READMEs provide the detailed implementation, validation,
+troubleshooting and interview-preparation material.
+
+## Operational Runbooks
+
+- [HavenBridge API and PostgreSQL Validation](runbooks/havenbridge-api-postgresql-validation.txt)
+- [NFS Storage Design and Recovery](storage/README.md)
+
+
+## Documentation Hierarchy
+root → platform → component READMEs

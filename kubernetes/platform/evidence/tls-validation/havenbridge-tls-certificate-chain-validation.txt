@@ -1,0 +1,69 @@
+HavenBridge TLS Certificate Chain Validation
+===========================================
+
+Purpose
+-------
+Provide a single high-level validation record showing the complete HavenBridge
+private PKI bootstrap and server certificate chain.
+
+Recommended project destination
+-------------------------------
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/platform/evidence/tls-validation/havenbridge-tls-certificate-chain-validation.txt
+
+Current Progress
+----------------
+1. havenbridge-selfsigned
+   ✅ Bootstrap ClusterIssuer created and validated
+
+2. havenbridge-root-ca
+   ✅ Root CA Certificate issued
+   ✅ Root CA Secret created in cert-manager namespace
+
+3. havenbridge-ca
+   ✅ Server-side dry-run passed
+   ⏳ Apply and READY validation still required
+
+4. havenbridge.lab certificate
+   ⏳ Not created yet
+
+Final Expected Chain
+--------------------
+havenbridge-selfsigned
+        ↓
+HavenBridge Root CA Certificate
+        ↓
+Secret: havenbridge-root-ca
+        ↓
+ClusterIssuer: havenbridge-ca
+        ↓
+Certificate: havenbridge-tls
+        ↓
+Secret: havenbridge-tls
+        ↓
+Traefik Gateway HTTPS listener
+        ↓
+https://havenbridge.lab
+
+Final Success Criteria
+----------------------
+1. havenbridge-selfsigned
+   ✅ READY=True
+
+2. havenbridge-root-ca
+   ✅ READY=True
+   ✅ Secret havenbridge-root-ca exists
+
+3. havenbridge-ca
+   ✅ READY=True
+
+4. havenbridge.lab certificate
+   ✅ READY=True
+   ✅ Secret havenbridge-tls exists
+   ✅ Certificate DNS name includes havenbridge.lab
+
+Overall TLS Certificate Chain
+-----------------------------
+Status: IN PROGRESS
+
+This file should be updated to PASS after all four certificate-chain resources
+have been applied and validated successfully.

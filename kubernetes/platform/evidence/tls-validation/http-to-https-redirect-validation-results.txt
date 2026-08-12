@@ -1,0 +1,33 @@
+HavenBridge TLS Phase — HTTP to HTTPS Redirect Validation Results
+==================================================================
+
+Validation status: PASS
+
+Observed request
+----------------
+Host: havenbridge.lab
+Resolved IPv4: 172.16.10.40
+Connected port: 80
+Request: GET /health/ready
+
+Observed response
+-----------------
+HTTP/1.1 301 Moved Permanently
+Location: https://havenbridge.lab/health/ready
+
+Conclusion
+----------
+The HavenBridge HTTP listener no longer routes application traffic directly
+to FastAPI.
+
+HTTP :80
+   ->
+Traefik web :8000
+   ->
+havenbridge-http-redirect HTTPRoute
+   ->
+301 redirect
+   ->
+https://havenbridge.lab/health/ready
+
+The HTTPS listener is now the application-serving path.

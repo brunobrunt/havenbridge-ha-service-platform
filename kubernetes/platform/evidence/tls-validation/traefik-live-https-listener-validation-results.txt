@@ -1,0 +1,51 @@
+HavenBridge TLS Phase — Live Gateway HTTPS Listener Validation Results
+===================================================================
+
+Validation status: PASS
+
+Gateway
+-------
+Address: 172.16.10.40
+Accepted: True
+Programmed: True
+Generation: 2
+
+HTTP listener
+-------------
+Name: web
+Hostname: havenbridge.lab
+Protocol: HTTP
+Port: 8000
+Attached Routes: 1
+Accepted: True
+ResolvedRefs: True
+Programmed: True
+
+HTTPS listener
+--------------
+Name: websecure
+Hostname: havenbridge.lab
+Protocol: HTTPS
+Port: 8443
+TLS Mode: Terminate
+Certificate Secret: havenbridge-tls
+Attached Routes: 0
+Accepted: True
+ResolvedRefs: True
+Programmed: True
+
+Events
+------
+None
+
+Conclusion
+----------
+The live Traefik Gateway successfully accepted and programmed the new HTTPS
+listener.
+
+The TLS Secret reference resolves correctly and the listener is ready to serve
+HTTPS traffic.
+
+Attached Routes=0 on websecure is expected at this checkpoint. The existing
+HavenBridge HTTPRoute targets the web listener specifically. The next task is
+to update the HTTPRoute so application traffic can attach to websecure.
