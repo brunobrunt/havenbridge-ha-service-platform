@@ -38,3 +38,6 @@ jobs:
 
       - name: Run HavenBridge API tests
         run: python -m pytest
+
+      - name: Build HavenBridge API Docker image
+        run: docker build --tag havenbridge-api:ci .
