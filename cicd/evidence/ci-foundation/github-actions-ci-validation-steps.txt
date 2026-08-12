@@ -1,0 +1,146 @@
+# GitHub Actions CI Foundation Validation Steps
+
+# Purpose
+
+Validate that the HavenBridge FastAPI automated test suite can run successfully
+on a clean GitHub-hosted runner without requiring access to the HavenBridge
+Kubernetes cluster or PostgreSQL database.
+
+# Workflow
+
+Workflow file:
+
+.github/workflows/ci.yml
+
+Workflow name:
+
+HavenBridge CI
+
+Job:
+
+FastAPI Tests
+
+# Validation Flow
+
+Developer commit
+↓
+git push to main
+↓
+GitHub detects push event
+↓
+HavenBridge CI workflow starts
+↓
+GitHub-hosted Ubuntu runner created
+↓
+Repository checked out
+↓
+Python 3.12 configured
+↓
+Development/test dependencies installed
+↓
+python -m pytest
+↓
+HavenBridge automated tests executed
+
+# Local Baseline
+
+Before enabling GitHub Actions, the automated tests were validated locally on
+Syrus.
+
+Application directory:
+
+/home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api
+
+Activate the local virtual environment:
+
+source .venv/bin/activate
+
+Run the tests:
+
+python -m pytest
+
+Expected result:
+
+6 tests pass.
+
+# GitHub Actions Validation
+
+1. Commit the GitHub Actions workflow.
+
+   git add .github/workflows/ci.yml
+
+   git diff --cached --check
+
+   git commit -m "ci: add FastAPI test workflow"
+
+2. Push the commit to the main branch.
+
+   git push origin main
+
+3. Open the HavenBridge repository on GitHub.
+
+4. Select:
+
+   Actions
+   ↓
+   HavenBridge CI
+   ↓
+   newest workflow run
+   ↓
+   FastAPI Tests
+
+5. Confirm the following workflow steps complete successfully:
+
+   Set up job
+   Checkout repository
+   Set up Python 3.12
+   Install Python dependencies
+   Run HavenBridge API tests
+   Complete job
+
+6. Expand:
+
+   Run HavenBridge API tests
+
+7. Confirm pytest discovers six tests:
+
+   tests/test_health.py
+   tests/test_inquiries.py
+
+8. Confirm the final result reports:
+
+   6 passed
+
+9. Record any warnings separately from test failures.
+
+# Expected Security Boundary
+
+The GitHub-hosted CI runner should NOT require:
+
+* HavenBridge Kubernetes kubeconfig
+* Kubernetes API access
+* SSH access to the homelab
+* PostgreSQL password
+* PostgreSQL SSH tunnel
+* NFS access
+* Traefik access
+* MetalLB access
+
+The test suite replaces the real PostgreSQL session with a controlled
+FakeDatabaseSession.
+
+This allows application tests to execute independently of the HavenBridge
+production-style Kubernetes environment.
+
+# Success Criteria
+
+The CI foundation is considered successfully validated when:
+
+* A push to main automatically starts the workflow.
+* The GitHub-hosted runner checks out the repository.
+* Python 3.12 is configured.
+* Development dependencies install successfully.
+* pytest discovers six HavenBridge tests.
+* All six tests pass.
+* The FastAPI Tests job reports Success.
+

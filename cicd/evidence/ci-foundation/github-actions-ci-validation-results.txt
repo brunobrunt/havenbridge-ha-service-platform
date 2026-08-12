@@ -1,0 +1,153 @@
+# GitHub Actions CI Foundation Validation Results
+
+# Validation Status
+
+SUCCESS
+
+# Workflow
+
+Workflow:
+
+HavenBridge CI
+
+Job:
+
+FastAPI Tests
+
+Trigger:
+
+Push to main
+
+Commit:
+
+dbacb1a
+
+Commit message:
+
+ci: add FastAPI test workflow
+
+# Runner
+
+Runner type:
+
+GitHub-hosted runner
+
+Operating system:
+
+Linux / Ubuntu GitHub-hosted environment
+
+Python:
+
+3.12.13
+
+Pytest:
+
+9.1.1
+
+# Workflow Step Results
+
+Set up job
+Result: PASS
+
+Checkout repository
+Result: PASS
+
+Set up Python 3.12
+Result: PASS
+
+Install Python dependencies
+Result: PASS
+
+Run HavenBridge API tests
+Result: PASS
+
+Complete job
+Result: PASS
+
+# Pytest Results
+
+Tests collected:
+
+6
+
+Health tests:
+
+tests/test_health.py
+3 passed
+
+Inquiry tests:
+
+tests/test_inquiries.py
+3 passed
+
+Total:
+
+6 passed
+0 failed
+
+Warning count:
+
+1
+
+# Observed Warning
+
+The test run reported a StarletteDeprecationWarning related to the current
+FastAPI TestClient / HTTPX dependency combination.
+
+The warning did not cause the CI job or tests to fail.
+
+It will be treated as a dependency-maintenance item rather than a blocker for
+the initial CI implementation.
+
+# Validated CI Flow
+
+git push to main
+↓
+GitHub
+↓
+HavenBridge CI
+↓
+GitHub-hosted Ubuntu runner
+↓
+Checkout repository
+↓
+Set up Python 3.12
+↓
+Install requirements-dev.txt
+↓
+python -m pytest
+↓
+test_health.py
+↓
+test_inquiries.py
+↓
+6 passed
+↓
+CI SUCCESS
+
+# Security Validation
+
+The automated tests completed without requiring:
+
+* access to the HavenBridge Kubernetes cluster;
+* access to the real HavenBridge PostgreSQL database;
+* PostgreSQL credentials;
+* the PostgreSQL SSH tunnel;
+* Kubernetes credentials; or
+* homelab network access.
+
+The existing FakeDatabaseSession test fixture successfully isolated the
+GitHub-hosted CI environment from the production-style database environment.
+
+# Conclusion
+
+The first HavenBridge Continuous Integration stage is operational.
+
+A push to the main branch now automatically launches the HavenBridge CI
+workflow on a GitHub-hosted runner and validates the FastAPI application using
+the existing pytest test suite.
+
+All six automated tests passed successfully.
+
+The next CI stage is Docker image build validation.
+
