@@ -1,0 +1,261 @@
+# GitHub Actions Docker Build Validation Results
+
+# Validation Status
+
+SUCCESS
+
+# Purpose
+
+Validate that the HavenBridge FastAPI production Docker image can be built
+successfully on a clean GitHub-hosted runner after the automated FastAPI tests
+pass.
+
+This validation confirms Docker image creation only.
+
+The image was not pushed to GitHub Container Registry and was not deployed to
+Kubernetes during this stage.
+
+# Workflow
+
+Workflow:
+
+HavenBridge CI
+
+Job:
+
+FastAPI Tests
+
+Runner:
+
+GitHub-hosted Ubuntu runner
+
+Trigger:
+
+Push to main
+
+# Observed Workflow Run
+
+The GitHub Actions workflow completed successfully.
+
+The observed workflow steps were:
+
+```
+Set up job                               PASS
+Checkout repository                     PASS
+Set up Python 3.12                      PASS
+Install Python dependencies             PASS
+Run HavenBridge API tests               PASS
+Build HavenBridge API Docker image      PASS
+Complete job                            PASS
+```
+
+# FastAPI Test Results
+
+The automated test suite completed before the Docker build step.
+
+Observed result:
+
+```
+tests/test_health.py       3 passed
+tests/test_inquiries.py    3 passed
+```
+
+Total:
+
+```
+6 passed
+0 failed
+```
+
+The existing dependency warning related to FastAPI/Starlette TestClient and
+HTTPX was observed again.
+
+The warning did not cause the tests or workflow to fail.
+
+# Docker Build Validation
+
+The GitHub Actions workflow executed:
+
+```
+docker build --tag havenbridge-api:ci .
+```
+
+The command ran from:
+
+```
+applications/havenbridge-api
+```
+
+because the workflow defines that directory as the default working directory
+for shell commands.
+
+# Docker Build Context
+
+The build context contained the HavenBridge API application resources required
+by the Dockerfile, including:
+
+```
+Dockerfile
+requirements.txt
+app/
+```
+
+# Validated Docker Build Flow
+
+GitHub-hosted runner
+↓
+Run FastAPI tests
+↓
+6 tests passed
+↓
+Run Docker build
+↓
+Read Dockerfile
+↓
+Use python:3.12-slim base image
+↓
+Install production Python dependencies
+↓
+Copy HavenBridge FastAPI source
+↓
+Create non-root havenbridge user
+↓
+Build image
+↓
+havenbridge-api:ci
+↓
+PASS
+
+# Temporary CI Image
+
+Image tag used during validation:
+
+```
+havenbridge-api:ci
+```
+
+The `ci` tag identifies this image as a temporary Continuous Integration build.
+
+It is not the production registry image name.
+
+# Observed GitHub Actions Result
+
+The GitHub Actions interface showed a green successful result for:
+
+```
+Build HavenBridge API Docker image
+```
+
+The complete:
+
+```
+FastAPI Tests
+```
+
+job also reported success.
+
+The Docker build step completed successfully on the GitHub-hosted runner.
+
+# Publication Boundary
+
+The following actions were NOT performed during this validation:
+
+```
+GHCR authentication             NOT PERFORMED
+
+Push image to GHCR              NOT PERFORMED
+
+Update Kubernetes Deployment    NOT PERFORMED
+
+Kubernetes rollout              NOT PERFORMED
+
+HTTPS deployment validation     NOT PERFORMED
+```
+
+# Runner Lifecycle
+
+The image:
+
+```
+havenbridge-api:ci
+```
+
+was created only inside the temporary GitHub-hosted runner.
+
+The image was not persisted to a container registry.
+
+When the GitHub-hosted runner is destroyed after the workflow job completes,
+the temporary local Docker image is also removed.
+
+# Security Boundary
+
+This Docker build validation did not require:
+
+```
+Kubernetes credentials
+Kubernetes API access
+PostgreSQL credentials
+PostgreSQL SSH tunnel
+SSH access to the HavenBridge homelab
+NFS access
+Traefik access
+MetalLB access
+```
+
+The GitHub-hosted runner remained a build and validation environment rather
+than a Kubernetes deployment environment.
+
+# Success Criteria
+
+The Docker build validation succeeded because:
+
+```
+FastAPI automated tests passed                    YES
+
+Six tests completed successfully                  YES
+
+Docker build started after successful testing    YES
+
+Dockerfile built successfully                     YES
+
+Temporary image tag was created                   YES
+
+GitHub Actions job reported Success               YES
+
+Image was not pushed to GHCR                      YES
+
+Kubernetes was not modified                       YES
+```
+
+# Conclusion
+
+The HavenBridge CI pipeline can now automatically validate both application
+behavior and Docker image creation.
+
+The validated CI flow is:
+
+```
+git push
+    ↓
+GitHub
+    ↓
+HavenBridge CI
+    ↓
+GitHub-hosted runner
+    ↓
+Python dependencies
+    ↓
+python -m pytest
+    ↓
+6 tests passed
+    ↓
+docker build
+    ↓
+havenbridge-api:ci
+    ↓
+CI SUCCESS
+```
+
+The next CI stage can build on this validated foundation by adding Kubernetes
+manifest validation before container publication to GitHub Container Registry.
+

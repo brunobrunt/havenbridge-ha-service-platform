@@ -1,0 +1,230 @@
+# GitHub Actions Docker Build Validation Steps
+
+# Purpose
+
+Validate that the HavenBridge FastAPI production Docker image can be built
+successfully on a clean GitHub-hosted runner after the automated Python tests
+pass.
+
+This stage validates image creation only.
+
+The image is NOT pushed to GitHub Container Registry during this validation.
+
+# Workflow File
+
+.github/workflows/ci.yml
+
+# Workflow
+
+HavenBridge CI
+
+# Job
+
+FastAPI Tests
+
+# Docker Build Context
+
+The GitHub Actions job uses:
+
+```
+working-directory:
+applications/havenbridge-api
+```
+
+Therefore the Docker build runs from:
+
+```
+applications/havenbridge-api
+```
+
+This directory contains:
+
+```
+Dockerfile
+requirements.txt
+app/
+```
+
+# Docker Build Command
+
+The CI workflow executes:
+
+```
+docker build --tag havenbridge-api:ci .
+```
+
+Meaning:
+
+```
+docker build
+    =
+Build a Docker image.
+
+--tag havenbridge-api:ci
+    =
+Give the temporary CI image the name:
+
+havenbridge-api:ci
+
+.
+    =
+Use the current application directory as the Docker build context.
+```
+
+# Validation Flow
+
+git push to main
+↓
+GitHub
+↓
+HavenBridge CI
+↓
+GitHub-hosted Ubuntu runner
+↓
+Checkout repository
+↓
+Set up Python 3.12
+↓
+Install Python dependencies
+↓
+Run python -m pytest
+↓
+6 tests must pass
+↓
+Run Docker build
+↓
+Docker reads Dockerfile
+↓
+Use python:3.12-slim base image
+↓
+Install production requirements
+↓
+Copy FastAPI application
+↓
+Create non-root havenbridge user
+↓
+Create image:
+havenbridge-api:ci
+
+# Validation Procedure
+
+1. Update the GitHub Actions workflow to include:
+
+   ```
+   - name: Build HavenBridge API Docker image
+     run: docker build --tag havenbridge-api:ci .
+   ```
+
+2. Validate the workflow change locally:
+
+   ```
+   git diff --check
+   ```
+
+3. Stage the workflow:
+
+   ```
+   git add .github/workflows/ci.yml
+   ```
+
+4. Validate the staged change:
+
+   ```
+   git diff --cached --check
+   ```
+
+5. Commit the change:
+
+   ```
+   git commit -m "ci: validate HavenBridge API Docker build"
+   ```
+
+6. Push to the main branch:
+
+   ```
+   git push origin main
+   ```
+
+7. Open the HavenBridge repository on GitHub.
+
+8. Navigate to:
+
+   ```
+   Actions
+      ↓
+   HavenBridge CI
+      ↓
+   newest workflow run
+      ↓
+   FastAPI Tests
+   ```
+
+9. Confirm these steps report success:
+
+   ```
+   Checkout repository
+   Set up Python 3.12
+   Install Python dependencies
+   Run HavenBridge API tests
+   Build HavenBridge API Docker image
+   ```
+
+10. Expand:
+
+    Build HavenBridge API Docker image
+
+11. Confirm the Docker build completes without errors.
+
+# Expected Result
+
+The workflow should show:
+
+```
+Run HavenBridge API tests            PASS
+```
+
+followed by:
+
+```
+Build HavenBridge API Docker image   PASS
+```
+
+The final job should report:
+
+```
+Success
+```
+
+# Important Boundary
+
+This stage does NOT:
+
+```
+authenticate to GHCR;
+push an image to GHCR;
+deploy the image to Kubernetes; or
+modify the running HavenBridge application.
+```
+
+The image:
+
+```
+havenbridge-api:ci
+```
+
+exists only inside the temporary GitHub-hosted runner.
+
+When the runner is destroyed after the job completes, that local image is
+also removed.
+
+# Success Criteria
+
+Docker build validation is successful when:
+
+* The existing six FastAPI tests pass.
+* The Docker build step starts only after the tests pass.
+* The Dockerfile builds successfully on a GitHub-hosted runner.
+* The temporary image receives the tag `havenbridge-api:ci`.
+* The FastAPI Tests job reports Success.
+* No GHCR publication occurs during this stage.
+
