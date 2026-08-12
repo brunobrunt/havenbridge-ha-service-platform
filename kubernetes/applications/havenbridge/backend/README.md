@@ -2756,3 +2756,169 @@ TLS validation evidence is maintained under:
 ```text
 /home/alabi/projects/havenbridge-ha-service-platform/kubernetes/platform/evidence/tls-validation/
 ```
+
+## Application Database Layer and Kubernetes
+
+The HavenBridge FastAPI backend uses SQLAlchemy as its application database
+layer and Psycopg as the PostgreSQL driver.
+
+Inside the HavenBridge API container, the application flow is:
+
+```text
+FastAPI
+   ↓
+SQLAlchemy
+   ↓
+Psycopg
+```
+
+These are application components running inside the API container.
+
+Kubernetes provides the infrastructure and network path that allows Psycopg
+to reach PostgreSQL:
+
+```text
+HavenBridge API Pod
+        ↓
+PostgreSQL Service
+        ↓
+TCP/5432
+        ↓
+PostgreSQL StatefulSet
+```
+
+The complete relationship is:
+
+```text
+Client
+   ↓
+HTTPS
+   ↓
+Traefik
+   ↓
+Gateway API
+   ↓
+HTTPRoute
+   ↓
+havenbridge-api Service
+   ↓
+HavenBridge API Pod
+┌─────────────────────────────┐
+│ FastAPI                     │
+│    ↓                        │
+│ SQLAlchemy                  │
+│    ↓                        │
+│ Psycopg                     │
+└─────────────┬───────────────┘
+              │
+              │ TCP/5432
+              ↓
+      PostgreSQL Service
+              ↓
+      PostgreSQL StatefulSet
+              ↓
+              PVC
+              ↓
+      NFS-backed PersistentVolume
+```
+
+### Application Components vs Kubernetes Resources
+
+It is important to distinguish the application software from the Kubernetes
+infrastructure.
+
+```text
+FastAPI
+SQLAlchemy
+Psycopg
+        =
+Application components
+running inside the API container
+```
+
+Kubernetes provides:
+
+```text
+Deployment
+Pod
+Service
+EndpointSlice
+NetworkPolicy
+StatefulSet
+PersistentVolumeClaim
+PersistentVolume
+```
+
+These resources provide the environment, networking, availability and storage
+required by the application.
+
+### PostgreSQL Service
+
+The HavenBridge API does not connect directly to a specific PostgreSQL Pod IP.
+
+Instead, it connects through the Kubernetes PostgreSQL Service.
+
+The Service provides a stable destination:
+
+```text
+HavenBridge API
+        ↓
+PostgreSQL Service
+        ↓
+TCP/5432
+        ↓
+havenbridge-postgres-0
+```
+
+This is important because Pod IP addresses can change when Pods are recreated.
+
+The Kubernetes Service gives the application a stable database endpoint even
+when the PostgreSQL Pod changes.
+
+### NetworkPolicy Protection
+
+Calico NetworkPolicy restricts access to the database.
+
+The intended communication path is:
+
+```text
+HavenBridge API
+        |
+        | TCP/5432
+        v
+PostgreSQL
+        allowed
+```
+
+Unrelated Pods are not permitted to connect directly to PostgreSQL.
+
+This means Psycopg can establish the required PostgreSQL connection from the
+HavenBridge API Pod while unapproved workloads remain blocked.
+
+### Simple Memory Hook
+
+```text
+SQLAlchemy
+= application database logic
+
+Psycopg
+= PostgreSQL driver
+
+PostgreSQL Service
+= stable Kubernetes network destination
+
+StatefulSet
+= runs PostgreSQL with stable workload identity
+
+PVC / PV
+= keeps PostgreSQL data persistent
+
+NetworkPolicy
+= controls who is allowed to connect
+```
+
+The detailed explanation of SQLAlchemy and Psycopg is documented in:
+
+```text
+applications/havenbridge-api/README.md
+```

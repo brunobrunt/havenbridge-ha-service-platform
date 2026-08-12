@@ -647,3 +647,171 @@ The next step is to:
 7. Validate direct in-cluster API-to-PostgreSQL communication
 8. Expose the API through Traefik and Gateway API
 
+
+## PostgreSQL Application Integration
+
+The HavenBridge FastAPI backend connects to PostgreSQL using SQLAlchemy and
+Psycopg.
+
+These components have different responsibilities:
+
+```text
+FastAPI
+   ↓
+SQLAlchemy
+   ↓
+Psycopg
+   ↓
+PostgreSQL
+```
+
+### What FastAPI Does
+
+FastAPI provides the application API endpoints.
+
+For example, a request such as:
+
+```text
+POST /api/v1/inquiries
+```
+
+is received by FastAPI.
+
+The application then processes the request and may need to create, retrieve or
+update information in PostgreSQL.
+
+FastAPI itself is not the PostgreSQL database driver.
+
+### What SQLAlchemy Does
+
+SQLAlchemy provides the higher-level database layer used by the HavenBridge
+application.
+
+It allows the application to work with database concepts such as:
+
+- Python database models;
+- database tables;
+- queries;
+- sessions;
+- creating records;
+- retrieving records; and
+- updating records.
+
+For example, the application can represent an inquiry as a Python object and
+SQLAlchemy can map that application data to the PostgreSQL table:
+
+```text
+service_inquiries
+```
+
+The relationship can be pictured as:
+
+```text
+Python application object
+        ↓
+SQLAlchemy
+        ↓
+PostgreSQL table
+```
+
+HavenBridge currently uses PostgreSQL tables including:
+
+```text
+platform_validation
+service_inquiries
+```
+
+### What Psycopg Does
+
+Psycopg is the PostgreSQL driver used by the Python application.
+
+While SQLAlchemy provides the higher-level database interface, Psycopg handles
+the lower-level communication with the PostgreSQL server.
+
+A simple way to remember the difference is:
+
+```text
+SQLAlchemy
+    =
+"What database operation does the application want to perform?"
+
+Psycopg
+    =
+"How does Python actually communicate that operation to PostgreSQL?"
+
+PostgreSQL
+    =
+"Where is the application data stored?"
+```
+
+SQLAlchemy therefore uses the PostgreSQL driver underneath when communicating
+with the database.
+
+### HavenBridge Database Request Flow
+
+A database-backed HavenBridge request can be pictured as:
+
+```text
+Client
+   ↓
+FastAPI endpoint
+   ↓
+Application logic
+   ↓
+SQLAlchemy
+   ↓
+Psycopg
+   ↓
+PostgreSQL connection
+   ↓
+PostgreSQL
+   ↓
+Application table
+```
+
+Inside Kubernetes, the network portion of that flow becomes:
+
+```text
+HavenBridge API Pod
+        ↓
+SQLAlchemy
+        ↓
+Psycopg
+        ↓
+PostgreSQL Service
+        ↓
+TCP/5432
+        ↓
+PostgreSQL StatefulSet
+```
+
+SQLAlchemy and Psycopg are therefore application components running inside the
+FastAPI container.
+
+The PostgreSQL Service, StatefulSet and NetworkPolicies are Kubernetes
+resources that provide the infrastructure around that application connection.
+
+### Simple Memory Hook
+
+```text
+FastAPI
+= receives and processes the API request
+
+SQLAlchemy
+= manages the application's database operations
+
+Psycopg
+= PostgreSQL driver used to communicate with the database
+
+PostgreSQL
+= stores the application data
+```
+
+### Interview Explanation
+
+A concise way to explain the design is:
+
+> The HavenBridge FastAPI backend uses SQLAlchemy as its database abstraction
+> and ORM layer, while Psycopg acts as the PostgreSQL driver. SQLAlchemy
+> manages models, sessions and database operations, while Psycopg provides the
+> underlying communication with PostgreSQL.
