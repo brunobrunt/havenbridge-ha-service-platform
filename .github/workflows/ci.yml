@@ -1,0 +1,40 @@
+name: HavenBridge CI
+
+on:
+  push:
+    branches:
+      - main
+
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: FastAPI Tests
+
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: applications/havenbridge-api
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --requirement requirements-dev.txt
+
+      - name: Run HavenBridge API tests
+        run: python -m pytest
