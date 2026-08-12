@@ -1,0 +1,869 @@
+HavenBridge GitHub Actions — Simple Concepts and Learning Notes
+===============================================================
+Purpose
+-------
+
+This file is a simple learning reference for the GitHub Actions concepts used
+in the HavenBridge CI/CD phase.
+
+It explains what each GitHub Actions concept means, why HavenBridge uses it,
+where it runs, and how it relates to the manual commands previously executed
+on Syrus.
+
+This is a learning/reference document.
+
+Validation evidence should remain in:
+
+    cicd/evidence/
+
+1. What Is GitHub Actions?
+--------------------------
+GitHub Actions is GitHub's automation platform.
+
+It allows HavenBridge to automatically perform tasks when events happen in
+the GitHub repository.
+
+Example:
+
+    Developer
+        ↓
+    git push
+        ↓
+    GitHub
+        ↓
+    GitHub Actions workflow
+        ↓
+    automated tests
+        ↓
+    Docker build
+        ↓
+    later: image publication and deployment
+
+Instead of manually repeating every validation step after each change,
+GitHub Actions can perform those steps automatically.
+
+2. Workflow
+-----------
+A workflow is the complete automation definition.
+
+For HavenBridge, the first workflow is stored at:
+
+    .github/workflows/ci.yml
+
+Simple meaning:
+
+    Workflow
+    =
+    "The complete set of automation instructions GitHub should follow."
+
+The workflow currently focuses on Continuous Integration.
+
+3. Workflow File Location
+-------------------------
+GitHub Actions workflow files live under:
+
+    .github/workflows/
+
+For HavenBridge:
+
+    /home/alabi/projects/havenbridge-ha-service-platform/.github/workflows/ci.yml
+
+The YAML file is NOT executed directly on Syrus.
+
+Do NOT run:
+
+    ./.github/workflows/ci.yml
+
+or:
+
+    bash .github/workflows/ci.yml
+
+Instead:
+
+    edit ci.yml
+        ↓
+    git add
+        ↓
+    git commit
+        ↓
+    git push
+        ↓
+    GitHub reads ci.yml
+        ↓
+    GitHub Actions executes the workflow
+
+4. Trigger
+----------
+A trigger is the event that starts a workflow.
+
+The HavenBridge CI workflow currently runs for:
+
+    push to main
+
+and:
+
+    pull request targeting main
+
+Conceptually:
+
+    Git event
+       ↓
+    Does it match the workflow trigger?
+       ↓
+      YES
+       ↓
+    Start workflow
+
+Because the workflow runs on every push to main, documentation commits can
+also appear in the GitHub Actions tab.
+
+For example:
+
+    docs: record GitHub Actions CI foundation validation
+
+appears in Actions because that commit was pushed to main.
+
+The commit message is not the workflow itself. It is the commit that caused
+the workflow to run.
+
+5. Job
+------
+A workflow contains one or more jobs.
+
+The first HavenBridge CI workflow currently has a job called:
+
+    FastAPI Tests
+
+Simple meaning:
+
+    Job
+    =
+    "A collection of related work performed on one runner."
+
+Conceptually:
+
+    Workflow
+       ↓
+    Job: FastAPI Tests
+       ↓
+    individual steps
+
+6. Runner
+---------
+A runner is the machine that actually executes a GitHub Actions job.
+
+Simple meaning:
+
+    Workflow = instructions
+    Runner   = machine following those instructions
+
+For the HavenBridge CI job we currently use:
+
+    GitHub-hosted runner
+
+with:
+
+    runs-on: ubuntu-latest
+
+GitHub creates a temporary Ubuntu environment for the job.
+
+That machine is separate from:
+
+    syrus
+    eph-cp01
+    eph-cp02
+    eph-cp03
+    eph-worker01
+    eph-worker02
+
+The GitHub-hosted runner exists for the workflow job and is discarded after
+the job completes.
+
+7. GitHub-Hosted Runner
+-----------------------
+A GitHub-hosted runner is a temporary machine provided by GitHub.
+
+For HavenBridge CI it performs work such as:
+
+    checkout source
+        ↓
+    set up Python
+        ↓
+    install dependencies
+        ↓
+    run pytest
+        ↓
+    build Docker image
+
+Advantages for CI:
+
+    - no runner server to maintain;
+    - fresh environment for every run;
+    - no direct access to the HavenBridge homelab is required;
+    - useful isolation from Kubernetes credentials and infrastructure.
+
+8. Self-Hosted Runner
+---------------------
+A self-hosted runner is a machine controlled by the HavenBridge environment
+rather than GitHub.
+
+It will be introduced later for Continuous Deployment.
+
+The reason is that deployment requires access to the private Kubernetes
+environment.
+
+Conceptually:
+
+    GitHub-hosted runner
+        =
+    build and validation environment
+
+    Self-hosted HavenBridge runner
+        =
+    private deployment environment
+
+The planned CD runner will eventually perform tasks such as:
+
+    deploy approved image
+        ↓
+    kubectl apply / update image
+        ↓
+    kubectl rollout status
+        ↓
+    HTTPS health validation
+
+9. Why CI and CD Use Separate Runner Types
+------------------------------------------
+The separation is intentional.
+
+CI does not need Kubernetes administrative access.
+CD does.
+
+Simple architecture:
+
+    GitHub-hosted CI
+            ↓
+    tests / build / validation
+            ↓
+          GHCR
+            ↓
+    Self-hosted CD
+            ↓
+    HavenBridge Kubernetes
+
+This creates a useful security boundary:
+
+    CI runner
+    =
+    no Kubernetes credentials required
+    no homelab network access required
+
+    CD runner
+    =
+    controlled access to the private Kubernetes environment
+
+GitHub-hosted runners could technically also be used for CD if a secure
+private-network connection were created, but the HavenBridge design separates
+CI and CD to keep cluster access controlled and easier to understand.
+
+10. Step
+--------
+A job contains steps.
+
+A step is one individual action or command.
+
+Examples from HavenBridge:
+
+    Checkout repository
+    Set up Python 3.12
+    Install Python dependencies
+    Run HavenBridge API tests
+    Build HavenBridge API Docker image
+
+11. uses:
+---------
+In GitHub Actions YAML, `uses:` means:
+
+    "Use an existing GitHub Action."
+
+Example:
+
+    uses: actions/checkout@v7
+
+Another example:
+
+    uses: actions/setup-python@v6
+
+Simple memory hook:
+
+    uses:
+    =
+    use an existing reusable action
+
+12. run:
+--------
+In GitHub Actions YAML, `run:` means:
+
+    "Execute this shell command on the runner."
+
+Examples:
+
+    run: python -m pytest
+
+    run: docker build --tag havenbridge-api:ci .
+
+Simple memory hook:
+
+    run:
+    =
+    execute a command
+
+13. working-directory:
+----------------------
+The FastAPI application lives at:
+
+    applications/havenbridge-api
+
+The workflow therefore uses:
+
+    defaults:
+      run:
+        working-directory: applications/havenbridge-api
+
+Simple meaning:
+
+    "Run shell commands from the FastAPI application directory."
+
+This is similar to manually doing on Syrus:
+
+    cd /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api
+
+before running:
+
+    python -m pytest
+
+The directory contains:
+
+    requirements.txt
+    requirements-dev.txt
+    pytest.ini
+    tests/
+    Dockerfile
+    app/
+
+14. Local Virtual Environment vs GitHub Runner
+----------------------------------------------
+On Syrus:
+
+    cd /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api
+    source .venv/bin/activate
+    python -m pytest
+
+The local `.venv` belongs to Syrus.
+
+It is not committed to Git and does not exist on a fresh GitHub runner.
+
+GitHub Actions instead does:
+
+    GitHub-hosted runner
+        ↓
+    actions/setup-python
+        ↓
+    Python 3.12 available
+        ↓
+    pip install requirements-dev.txt
+        ↓
+    python -m pytest
+
+Therefore the current GitHub Actions workflow does not need:
+
+    source .venv/bin/activate
+
+15. What `python -m pytest` Means
+---------------------------------
+The command:
+
+    python -m pytest
+
+does NOT run the HavenBridge application itself.
+
+It means:
+
+    Python
+       ↓
+    run the installed Python module named pytest
+       ↓
+    pytest discovers tests
+       ↓
+    pytest executes tests
+       ↓
+    PASS / FAIL
+
+The `-m` option means:
+
+    "Run a Python module as a program."
+
+Compare:
+
+    Run the application:
+        python -m uvicorn app.main:app
+
+    Run the tests:
+        python -m pytest
+
+16. requirements.txt
+--------------------
+Path:
+
+    applications/havenbridge-api/requirements.txt
+
+Simple meaning:
+
+    "Packages the real HavenBridge application needs to run."
+
+Important packages include:
+
+    FastAPI            = API framework
+    Uvicorn            = ASGI web server
+    SQLAlchemy         = application database layer / ORM
+    Psycopg            = PostgreSQL driver
+    Pydantic Settings  = configuration loading and validation
+    email-validator    = email-format validation
+
+17. requirements-dev.txt
+------------------------
+Path:
+
+    applications/havenbridge-api/requirements-dev.txt
+
+Simple meaning:
+
+    "Everything developers and CI need for testing."
+
+It first installs:
+
+    requirements.txt
+
+and then adds:
+
+    pytest
+    httpx
+
+Conceptually:
+
+    requirements.txt
+        =
+    application dependencies
+
+    requirements-dev.txt
+        =
+    application dependencies
+    +
+    testing dependencies
+
+18. pytest.ini
+--------------
+Path:
+
+    applications/havenbridge-api/pytest.ini
+
+This tells pytest how to discover HavenBridge tests.
+
+Important rules:
+
+    testpaths = tests
+
+    python_files = test_*.py
+
+    python_functions = test_*
+
+So pytest looks in:
+
+    tests/
+
+for files such as:
+
+    test_health.py
+    test_inquiries.py
+
+19. conftest.py
+---------------
+Path:
+
+    applications/havenbridge-api/tests/conftest.py
+
+This file provides shared pytest fixtures.
+
+It creates a controlled fake database environment so the automated tests do
+not need the real PostgreSQL database.
+
+Real application:
+
+    FastAPI
+       ↓
+    SQLAlchemy
+       ↓
+    Psycopg
+       ↓
+    PostgreSQL
+
+Automated tests:
+
+    FastAPI
+       ↓
+    FakeDatabaseSession
+       ↓
+    temporary Python memory
+
+This means the first GitHub-hosted CI job does NOT require:
+
+    Kubernetes credentials
+    PostgreSQL password
+    PostgreSQL SSH tunnel
+    homelab network access
+    NFS
+    Traefik
+    MetalLB
+
+20. Pytest Fixture
+------------------
+A pytest fixture is something pytest prepares for a test.
+
+Example:
+
+    test asks for fake_db_session
+        ↓
+    pytest finds fixture
+        ↓
+    fixture creates fake database session
+        ↓
+    test receives it
+
+21. FakeDatabaseSession
+-----------------------
+FakeDatabaseSession imitates only the SQLAlchemy Session behavior currently
+required by HavenBridge tests.
+
+It supports methods such as:
+
+    add()
+    commit()
+    refresh()
+    rollback()
+    scalars()
+    execute()
+
+It does not use a real PostgreSQL server.
+
+Instead, test records are temporarily stored in Python memory.
+
+22. FastAPI TestClient
+----------------------
+TestClient lets tests make requests directly against the FastAPI application
+without manually starting Uvicorn.
+
+Instead of:
+
+    python -m uvicorn app.main:app
+
+and then:
+
+    curl http://localhost:8000/health/live
+
+the test can do conceptually:
+
+    client.get("/health/live")
+
+23. Current HavenBridge Test Suite
+----------------------------------
+The first CI workflow runs six tests.
+
+Health tests:
+
+    tests/test_health.py
+    3 tests
+
+Inquiry tests:
+
+    tests/test_inquiries.py
+    3 tests
+
+Total:
+
+    6 tests
+
+The first successful local baseline on Syrus reported:
+
+    6 passed
+
+The first successful GitHub Actions run also reported:
+
+    6 passed
+
+24. Current CI Pipeline
+-----------------------
+The first validated HavenBridge CI pipeline is:
+
+    git push
+       ↓
+    GitHub
+       ↓
+    push trigger
+       ↓
+    HavenBridge CI workflow
+       ↓
+    GitHub-hosted runner
+       ↓
+    Checkout repository
+       ↓
+    Set up Python 3.12
+       ↓
+    Install Python dependencies
+       ↓
+    python -m pytest
+       ↓
+    test_health.py
+       ↓
+    test_inquiries.py
+       ↓
+    6 / 6 tests passed
+       ↓
+    CI SUCCESS
+
+25. How to Check the CI Result on GitHub
+----------------------------------------
+After pushing a workflow-triggering commit:
+
+    GitHub repository
+        ↓
+    Actions
+        ↓
+    HavenBridge CI
+        ↓
+    newest workflow run
+        ↓
+    FastAPI Tests
+
+A green checkmark means the step or job succeeded.
+
+To inspect pytest results:
+
+    Actions
+        ↓
+    HavenBridge CI
+        ↓
+    workflow run
+        ↓
+    FastAPI Tests
+        ↓
+    Run HavenBridge API tests
+
+Expected result:
+
+    collected 6 items
+
+    tests/test_health.py ...       [50%]
+    tests/test_inquiries.py ...    [100%]
+
+    6 passed
+
+26. Current Warning
+-------------------
+The test suite currently reports one dependency warning involving the
+FastAPI/Starlette TestClient and HTTPX dependency combination.
+
+The warning does not currently fail the tests.
+
+It is treated as a future dependency-maintenance item rather than a blocker
+for the initial CI implementation.
+
+27. Docker Build Validation
+---------------------------
+The next CI stage adds:
+
+    docker build --tag havenbridge-api:ci .
+
+This does NOT publish the image.
+
+It only proves that a clean GitHub-hosted runner can build the HavenBridge
+production container image successfully.
+
+Conceptually:
+
+    pytest
+       ↓
+    6 tests pass
+       ↓
+    docker build
+       ↓
+    Docker reads Dockerfile
+       ↓
+    python:3.12-slim
+       ↓
+    install requirements.txt
+       ↓
+    copy application source
+       ↓
+    create non-root havenbridge user
+       ↓
+    image built:
+    havenbridge-api:ci
+
+The tag:
+
+    havenbridge-api:ci
+
+is a temporary CI image tag.
+
+It is NOT yet:
+
+    ghcr.io/brunobrunt/havenbridge-api:<version>
+
+GHCR publication will be implemented in a later stage.
+
+28. Planned CI/CD Learning Progression
+--------------------------------------
+HavenBridge GitHub Actions will be learned and implemented one stage at a time.
+
+    GitHub Actions architecture documented
+        ↓
+    GitHub-hosted runner understood
+        ↓
+    pytest automated
+        ↓
+    6 / 6 tests passed
+        ↓
+    Docker build validation
+        ← current next stage
+        ↓
+    Kubernetes manifest validation
+        ↓
+    GHCR authentication
+        ↓
+    image tagging
+        ↓
+    image publication
+        ↓
+    self-hosted deployment runner
+        ↓
+    Kubernetes CD
+        ↓
+    rollout verification
+        ↓
+    HTTPS health validation
+        ↓
+    rollback procedures
+
+29. CI vs CD
+------------
+Continuous Integration (CI):
+
+    "Is this code change valid enough to continue?"
+
+Current CI responsibilities:
+
+    checkout code
+        ↓
+    configure Python
+        ↓
+    install dependencies
+        ↓
+    run tests
+        ↓
+    validate Docker build
+        ↓
+    later: validate Kubernetes manifests
+
+Continuous Deployment (CD):
+
+    "Can this approved version be deployed successfully?"
+
+Planned CD responsibilities:
+
+    approved release
+        ↓
+    self-hosted HavenBridge runner
+        ↓
+    deploy image
+        ↓
+    update Kubernetes workload
+        ↓
+    watch rollout
+        ↓
+    verify Pods Ready
+        ↓
+    HTTPS health check
+
+30. Complete Target Architecture
+--------------------------------
+Developer
+       ↓
+    git push / pull request
+       ↓
+    GitHub
+       ↓
+    ┌──────────────────────────────────────┐
+    │ GitHub-hosted runner                 │
+    │                                      │
+    │  CI                                  │
+    │  ├─ Checkout source                  │
+    │  ├─ Set up Python                    │
+    │  ├─ Install dependencies             │
+    │  ├─ Run tests                        │
+    │  ├─ Validate Docker build            │
+    │  └─ Validate Kubernetes manifests    │
+    └─────────────────┬────────────────────┘
+                      ↓
+                 main approved
+                      ↓
+                 Build image
+                      ↓
+                    GHCR
+                      ↓
+    ┌──────────────────────────────────────┐
+    │ Self-hosted HavenBridge runner       │
+    │                                      │
+    │  CD                                  │
+    │  ├─ Pull/deploy approved version     │
+    │  ├─ kubectl apply / update image     │
+    │  ├─ Watch rollout                    │
+    │  └─ HTTPS health validation          │
+    └─────────────────┬────────────────────┘
+                      ↓
+              HavenBridge Kubernetes
+
+31. Quick Memory Hooks
+----------------------
+Workflow            = complete automation definition
+    Trigger             = event that starts the workflow
+    Job                 = group of related work
+    Runner              = machine executing the job
+    Step                = one action or command inside a job
+    uses:               = use an existing GitHub Action
+    run:                = execute a shell command
+    working-directory:  = directory where shell commands run
+    GitHub-hosted runner= temporary GitHub-managed build/test machine
+    Self-hosted runner  = HavenBridge-controlled deployment machine
+    CI                  = validate code/build before delivery
+    CD                  = deploy and verify an approved release
+    requirements.txt    = application dependencies
+    requirements-dev.txt= application dependencies plus testing tools
+    pytest              = automated Python test runner
+    python -m pytest    = tell Python to run the installed pytest module
+    Docker build        = prove the application image can be built
+    GHCR                = registry for approved HavenBridge images
+
+32. Interview Explanation
+-------------------------
+A concise explanation of the current HavenBridge GitHub Actions design:
+
+    "I use GitHub Actions for HavenBridge CI/CD. The CI workflow runs on a
+    GitHub-hosted Ubuntu runner and automatically checks out the repository,
+    configures Python 3.12, installs the test dependencies and runs the
+    FastAPI pytest suite. The tests use a fake database session, so CI does
+    not require access to the private Kubernetes or PostgreSQL environment.
+
+    I separate CI from CD because CI only needs a clean validation
+    environment, while deployment requires controlled access to the private
+    HavenBridge Kubernetes network. The later CD stage will therefore use a
+    self-hosted runner with restricted cluster access."
