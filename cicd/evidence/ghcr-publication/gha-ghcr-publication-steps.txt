@@ -1,0 +1,282 @@
+GitHub Actions GHCR Publication Validation Steps
+------------------------------------------------
+
+Purpose
+-------
+
+Validate that the HavenBridge GitHub Actions CI pipeline can publish the
+already-tested and already-built HavenBridge API container image to GitHub
+Container Registry (GHCR).
+
+This validation covers:
+
+- GHCR workflow permissions
+- GHCR authentication
+- Git SHA image tagging
+- container image publication
+- package authorization
+- publication failure troubleshooting
+- successful rerun
+- Git-to-container traceability
+
+
+Registry
+--------
+
+GitHub Container Registry:
+
+    ghcr.io
+
+HavenBridge package:
+
+    ghcr.io/brunobrunt/havenbridge-api
+
+
+Workflow Permission
+-------------------
+
+The GitHub Actions workflow requires:
+
+    permissions:
+      contents: read
+      packages: write
+
+Meaning:
+
+    contents: read
+        =
+    Allow the workflow to read repository contents.
+
+    packages: write
+        =
+    Allow the workflow GITHUB_TOKEN to publish packages to GHCR.
+
+
+Authentication
+--------------
+
+The workflow authenticates using:
+
+    - name: Log in to GitHub Container Registry
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: docker/login-action@v4
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+The workflow uses GitHub's temporary:
+
+    GITHUB_TOKEN
+
+A separate Personal Access Token is not required for this workflow.
+
+
+Main Branch Restriction
+-----------------------
+
+The GHCR publication path is restricted using:
+
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+Therefore:
+
+    pull request
+        ↓
+    tests
+    Docker build
+    Kubernetes manifest validation
+    GHCR publication skipped
+
+    push to main
+        ↓
+    tests
+    Docker build
+    Kubernetes manifest validation
+    GHCR login
+    image tag
+    image push
+
+
+Build Once Strategy
+-------------------
+
+The Docker image is first created as:
+
+    havenbridge-api:ci
+
+The image is not rebuilt before publication.
+
+The same image that passes CI is tagged for GHCR.
+
+Flow:
+
+    docker build
+        ↓
+    havenbridge-api:ci
+        ↓
+    automated validation
+        ↓
+    docker tag
+        ↓
+    GHCR image name
+        ↓
+    docker push
+
+
+Git SHA Tagging
+---------------
+
+The workflow tags the validated image using:
+
+    docker tag \
+      havenbridge-api:ci \
+      ghcr.io/brunobrunt/havenbridge-api:${GITHUB_SHA}
+
+GITHUB_SHA identifies the exact Git commit associated with the workflow run.
+
+This provides traceability:
+
+    Git source
+        ↓
+    Git commit SHA
+        ↓
+    Docker image
+        ↓
+    GHCR image
+
+
+GHCR Push
+---------
+
+The workflow publishes the tagged image using:
+
+    docker push \
+      ghcr.io/brunobrunt/havenbridge-api:${GITHUB_SHA}
+
+This uploads the container image from the temporary GitHub-hosted runner to
+GitHub Container Registry.
+
+
+Expected CI Flow
+----------------
+
+    git push to main
+        ↓
+    GitHub Actions
+        ↓
+    Checkout repository
+        ↓
+    Set up Python 3.12
+        ↓
+    Install dependencies
+        ↓
+    Run FastAPI tests
+        ↓
+    6 tests pass
+        ↓
+    Build Docker image
+        ↓
+    Install Kubeconform
+        ↓
+    Validate 9 Kubernetes resources
+        ↓
+    GHCR login
+        ↓
+    Tag image with GITHUB_SHA
+        ↓
+    Push image to GHCR
+        ↓
+    GHCR package persists after runner is destroyed
+
+
+Initial Publication Failure
+---------------------------
+
+During the first GHCR publication attempt, Docker successfully reached the
+registry and prepared the image layers, but the push failed with:
+
+    denied: permission_denied: write_package
+
+This showed an important difference between:
+
+    Authentication
+        =
+    Who is the workflow?
+
+and:
+
+    Authorization
+        =
+    What is the workflow allowed to modify?
+
+The workflow had authenticated successfully.
+
+The failure occurred because the repository did not initially have Write
+authorization to the existing HavenBridge API package.
+
+
+Authorization Fix
+-----------------
+
+In the GitHub package settings for:
+
+    havenbridge-api
+
+the repository:
+
+    havenbridge-ha-service-platform
+
+was granted:
+
+    Write
+
+access under the package's GitHub Actions access settings.
+
+
+Rerun
+-----
+
+No new application code or Docker image change was required.
+
+The same failed workflow was rerun after correcting package authorization.
+
+Expected result:
+
+    GHCR login       PASS
+    image tag        PASS
+    docker push      PASS
+
+
+Verification
+------------
+
+After successful publication, verify that GHCR contains an image tagged with
+the exact Git commit SHA used by the workflow.
+
+The image should be pullable using:
+
+    docker pull \
+      ghcr.io/brunobrunt/havenbridge-api:<FULL-GIT-SHA>
+
+
+Success Criteria
+----------------
+
+GHCR login succeeds.
+
+FastAPI tests remain successful.
+
+Docker build remains successful.
+
+Kubernetes manifest validation remains successful.
+
+The existing validated image is tagged with GITHUB_SHA.
+
+The image is pushed successfully to GHCR.
+
+The GHCR package contains the full Git SHA tag.
+
+The published image persists after the GitHub-hosted runner is destroyed.
+
+The exact Git commit can be traced to the exact published container image.
