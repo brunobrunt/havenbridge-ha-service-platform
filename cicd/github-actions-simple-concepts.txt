@@ -867,3 +867,482 @@ A concise explanation of the current HavenBridge GitHub Actions design:
     environment, while deployment requires controlled access to the private
     HavenBridge Kubernetes network. The later CD stage will therefore use a
     self-hosted runner with restricted cluster access."
+
+33. GitHub Actions Permissions for GHCR
+---------------------------------------
+
+Before the HavenBridge CI workflow can publish a Docker image to GitHub
+Container Registry (GHCR), the workflow must be given permission to write
+packages.
+
+The workflow previously used:
+
+    permissions:
+      contents: read
+
+This means:
+
+    contents: read
+        =
+    The workflow can read repository contents.
+
+For GHCR publication, the workflow now uses:
+
+    permissions:
+      contents: read
+      packages: write
+
+This means:
+
+    contents: read
+        =
+    Read the HavenBridge repository.
+
+    packages: write
+        =
+    Publish packages, including container images, to GitHub Packages/GHCR.
+
+
+GITHUB_TOKEN
+------------
+
+GitHub Actions automatically provides a temporary token called:
+
+    GITHUB_TOKEN
+
+The HavenBridge workflow can use this token to authenticate to GitHub
+Container Registry.
+
+For this same-repository workflow, a separate Personal Access Token is not
+required for the planned GHCR publication.
+
+
+Security Principle
+------------------
+
+Only the permissions required by the workflow should be granted.
+
+Current HavenBridge CI permission scope:
+
+    contents: read
+    packages: write
+
+The workflow has not been granted Kubernetes credentials or private homelab
+access.
+
+
+Current GHCR Progress
+---------------------
+
+Completed:
+
+    FastAPI tests                         YES
+    Docker build validation               YES
+    Kubernetes manifest validation        YES
+    GHCR package write permission         ADDED
+
+Not yet implemented:
+
+    GHCR login
+    GHCR image tag
+    GHCR image push
+
+
+Planned Flow
+------------
+
+Validated Docker image
+        ↓
+GITHUB_TOKEN
+        ↓
+packages: write
+        ↓
+Authenticate to ghcr.io
+        ↓
+Tag image
+        ↓
+Push image to GHCR
+
+
+Quick Memory Hook
+-----------------
+
+contents: read
+    =
+read the repository
+
+packages: write
+    =
+publish packages/container images
+
+GITHUB_TOKEN
+    =
+temporary GitHub-provided credential used by the workflow
+
+GHCR
+    =
+GitHub Container Registry
+
+
+34. GHCR Authentication
+-----------------------
+
+Before a GitHub Actions runner can push a container image to GitHub Container
+Registry, the runner must authenticate to:
+
+    ghcr.io
+
+HavenBridge uses:
+
+    docker/login-action@v4
+
+The workflow configuration is:
+
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v4
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+
+registry
+--------
+
+    ghcr.io
+
+is the GitHub Container Registry service.
+
+
+github.actor
+------------
+
+    ${{ github.actor }}
+
+represents the GitHub user or automation identity responsible for triggering
+the workflow.
+
+
+GITHUB_TOKEN
+------------
+
+    ${{ secrets.GITHUB_TOKEN }}
+
+is a temporary credential automatically created by GitHub Actions for the
+workflow.
+
+HavenBridge does not currently require a Personal Access Token for this
+same-repository GHCR publication workflow.
+
+
+Required Permission
+-------------------
+
+The workflow includes:
+
+    permissions:
+      contents: read
+      packages: write
+
+The important permission for publishing container images is:
+
+    packages: write
+
+
+Current Flow
+------------
+
+GitHub-hosted runner
+        ↓
+GITHUB_TOKEN created
+        ↓
+packages: write permission
+        ↓
+docker/login-action
+        ↓
+authenticate to ghcr.io
+
+Authentication does not publish an image by itself.
+
+Image tagging and image pushing are separate later steps.
+
+
+35. Restricting GHCR Publication to Main
+----------------------------------------
+
+The HavenBridge workflow runs for both:
+
+    push to main
+
+and:
+
+    pull requests targeting main
+
+CI validation should run for both events.
+
+However, container registry authentication and publication should only happen
+after trusted code reaches the main branch.
+
+The GHCR login step therefore uses:
+
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+Meaning:
+
+    Pull request
+        ↓
+    Run tests
+    Build Docker image
+    Validate Kubernetes manifests
+    Skip GHCR publication steps
+
+    Push to main
+        ↓
+    Run tests
+    Build Docker image
+    Validate Kubernetes manifests
+    Authenticate to GHCR
+    Later: tag and push image
+
+This creates a boundary between:
+
+    validation
+
+and:
+
+    publication
+
+Future GHCR tag and push steps should use the same condition.
+
+
+36. Tagging the Docker Image for GHCR
+-------------------------------------
+
+After the HavenBridge Docker image passes testing and build validation, the
+same image can be given a GitHub Container Registry name.
+
+The CI image currently exists as:
+
+    havenbridge-api:ci
+
+The workflow uses:
+
+    docker tag \
+      havenbridge-api:ci \
+      ghcr.io/brunobrunt/havenbridge-api:${GITHUB_SHA}
+
+
+docker tag
+----------
+
+The docker tag command does not rebuild the Docker image.
+
+It gives an existing Docker image another name.
+
+Conceptually:
+
+                       ┌── havenbridge-api:ci
+                       │
+    Same Docker image ─┤
+                       │
+                       └── ghcr.io/brunobrunt/havenbridge-api:<Git-SHA>
+
+
+GITHUB_SHA
+----------
+
+GitHub Actions automatically provides:
+
+    GITHUB_SHA
+
+This contains the Git commit SHA associated with the workflow run.
+
+Using the Git SHA in the container image tag creates traceability:
+
+    Git source code
+        ↓
+    Git commit SHA
+        ↓
+    Docker image
+        ↓
+    GHCR image tag
+
+
+Why the SHA Is Useful
+---------------------
+
+A SHA-tagged image answers:
+
+    "Exactly which Git commit created this container image?"
+
+Example concept:
+
+    Git commit:
+    abc123...
+
+        ↓
+
+    Container image:
+    ghcr.io/brunobrunt/havenbridge-api:abc123...
+
+
+Tagging Is Not Publishing
+-------------------------
+
+The docker tag command does NOT upload anything to GHCR.
+
+At this stage:
+
+    Docker image built              YES
+    K8s manifests validated         YES
+    GHCR authentication configured  YES
+    GHCR image tag created          YES
+
+But:
+
+    Image pushed to GHCR            NO
+
+The actual publication requires a later:
+
+    docker push
+
+
+Main Branch Restriction
+-----------------------
+
+The image-tagging step uses:
+
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+Therefore pull requests continue to perform validation but do not enter the
+registry publication path.
+
+
+37. Publishing the Docker Image to GHCR
+---------------------------------------
+
+After the validated HavenBridge image has been tagged with its GHCR name,
+the image can be uploaded to GitHub Container Registry.
+
+The workflow uses:
+
+    docker push \
+      ghcr.io/brunobrunt/havenbridge-api:${GITHUB_SHA}
+
+
+docker push
+-----------
+
+The docker push command uploads a locally available Docker image to a
+container registry.
+
+For HavenBridge:
+
+    GitHub-hosted runner
+        ↓
+    havenbridge-api:ci
+        ↓
+    docker tag
+        ↓
+    ghcr.io/brunobrunt/havenbridge-api:<Git-SHA>
+        ↓
+    docker push
+        ↓
+    GitHub Container Registry
+
+
+Build, Tag, and Push Are Different
+----------------------------------
+
+docker build
+    =
+create the container image
+
+docker tag
+    =
+give the existing image another name
+
+docker login
+    =
+authenticate to the container registry
+
+docker push
+    =
+upload the image to the registry
+
+
+Build Once
+----------
+
+The HavenBridge CI workflow does not rebuild the application before
+publication.
+
+The preferred flow is:
+
+    Build once
+        ↓
+    Run validation
+        ↓
+    Tag the validated image
+        ↓
+    Push the same image
+
+This ensures that the container artifact being published is the same image
+that passed the CI pipeline.
+
+
+SHA Image Tag
+-------------
+
+The published image will initially use:
+
+    ghcr.io/brunobrunt/havenbridge-api:${GITHUB_SHA}
+
+This provides exact traceability between:
+
+    Git commit
+        ↓
+    GitHub Actions workflow
+        ↓
+    Docker image
+        ↓
+    GHCR package
+
+
+Publication Restriction
+-----------------------
+
+The push step uses:
+
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+Therefore:
+
+    pull request
+        =
+    validation only
+
+    push to main
+        =
+    validation plus GHCR publication
+
+
+Semantic Versions
+-----------------
+
+Git SHA publication does not replace Semantic Versioning.
+
+Future intentional releases can give the same image an additional tag such
+as:
+
+    ghcr.io/brunobrunt/havenbridge-api:v0.2.0
+
+Therefore the same image may eventually have:
+
+    v0.2.0
+        =
+    human-readable application release
+
+    <Git-SHA>
+        =
+    exact source-code revision
