@@ -11,7 +11,7 @@ on:
 
 permissions:
   contents: read
-
+  packages: write
 jobs:
   test:
     name: FastAPI Tests
@@ -64,3 +64,24 @@ jobs:
             -schema-location default \
             -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
             "$GITHUB_WORKSPACE"/kubernetes/applications/havenbridge/backend/*.yaml
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag HavenBridge API image for GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          docker tag \
+            havenbridge-api:ci \
+            ghcr.io/brunobrunt/havenbridge-api:${GITHUB_SHA}
+
+      - name: Push HavenBridge API image to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          docker push \
+            ghcr.io/brunobrunt/havenbridge-api:${GITHUB_SHA}
