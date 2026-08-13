@@ -1,0 +1,300 @@
+GitHub Actions Kubernetes Manifest Validation Steps
+------------------------------------------------------------
+
+Purpose
+------------------------------------------------------------
+
+Validate the HavenBridge backend Kubernetes manifests automatically in the
+GitHub Actions CI pipeline before container publication or deployment.
+
+This validation checks the Kubernetes resource definitions against their
+schemas without requiring access to the private HavenBridge Kubernetes
+cluster.
+
+
+Validation Scope
+------------------------------------------------------------
+
+Directory:
+
+kubernetes/applications/havenbridge/backend/
+
+Manifests:
+
+configmap.yaml
+deployment.yaml
+httproute-http-redirect.yaml
+httproute.yaml
+networkpolicy-egress.yaml
+networkpolicy-postgres-ingress.yaml
+networkpolicy.yaml
+pdb.yaml
+service.yaml
+
+Total manifests:
+
+9
+
+
+Resource Types
+------------------------------------------------------------
+
+Built-in Kubernetes resources:
+
+ConfigMap
+Deployment
+NetworkPolicy
+PodDisruptionBudget
+Service
+
+Gateway API custom resource:
+
+HTTPRoute
+
+
+Validation Tool
+------------------------------------------------------------
+
+Kubeconform
+
+Version:
+
+v0.8.0
+
+
+Why Kubeconform
+------------------------------------------------------------
+
+Kubeconform validates Kubernetes YAML resources against Kubernetes OpenAPI
+schemas.
+
+This allows the CI pipeline to catch problems such as:
+
+invalid resource fields
+incorrect API structure
+unsupported properties
+schema mismatches
+duplicate YAML keys when strict validation is enabled
+
+The validation happens before deployment.
+
+
+CI Runner
+------------------------------------------------------------
+
+The validation runs on the existing GitHub-hosted Ubuntu runner.
+
+It does NOT start another runner because it is another step inside the same
+GitHub Actions job.
+
+
+Kubeconform Installation
+------------------------------------------------------------
+
+The workflow installs Kubeconform using:
+
+KUBECONFORM_VERSION="0.8.0"
+
+mkdir -p "$HOME/.local/bin"
+
+curl --fail --location --silent --show-error \
+  "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
+  | tar -xz -C "$HOME/.local/bin" kubeconform
+
+echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+"$HOME/.local/bin/kubeconform" -v
+
+
+Why GITHUB_PATH Is Used
+------------------------------------------------------------
+
+The Kubeconform executable is installed into:
+
+$HOME/.local/bin
+
+Appending that directory to:
+
+$GITHUB_PATH
+
+makes the kubeconform command available to later steps in the same GitHub
+Actions job.
+
+
+Manifest Validation Command
+------------------------------------------------------------
+
+The workflow executes:
+
+kubeconform \
+  -strict \
+  -summary \
+  -kubernetes-version 1.36.2 \
+  -schema-location default \
+  -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+  "$GITHUB_WORKSPACE"/kubernetes/applications/havenbridge/backend/*.yaml
+
+
+Option Explanation
+------------------------------------------------------------
+
+-strict
+
+Use stricter schema validation and detect additional invalid properties.
+
+
+-summary
+
+Print a summary showing:
+
+resources found
+valid resources
+invalid resources
+errors
+skipped resources
+
+
+-kubernetes-version 1.36.2
+
+Validate built-in resources against Kubernetes 1.36.2 schemas.
+
+
+-schema-location default
+
+Use Kubeconform's normal Kubernetes schemas for resources such as:
+
+Deployment
+Service
+ConfigMap
+NetworkPolicy
+PodDisruptionBudget
+
+
+Additional CRD Schema Location
+------------------------------------------------------------
+
+The additional schema location:
+
+https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json
+
+allows Kubeconform to obtain schemas for custom resources.
+
+For HavenBridge, this is required for:
+
+gateway.networking.k8s.io/v1
+HTTPRoute
+
+
+Why GITHUB_WORKSPACE Is Used
+------------------------------------------------------------
+
+The GitHub Actions job has this default working directory:
+
+applications/havenbridge-api
+
+However, the Kubernetes manifests are outside that directory.
+
+GITHUB_WORKSPACE points to the root of the checked-out GitHub repository.
+
+Therefore:
+
+"$GITHUB_WORKSPACE"/kubernetes/applications/havenbridge/backend/*.yaml
+
+allows Kubeconform to locate all HavenBridge backend manifests regardless of
+the FastAPI working-directory setting.
+
+
+Validation Flow
+------------------------------------------------------------
+
+git push
+   ↓
+GitHub
+   ↓
+HavenBridge CI
+   ↓
+GitHub-hosted runner
+   ↓
+Checkout repository
+   ↓
+Set up Python 3.12
+   ↓
+Install Python dependencies
+   ↓
+Run FastAPI tests
+   ↓
+6 tests pass
+   ↓
+Build Docker image
+   ↓
+Install Kubeconform v0.8.0
+   ↓
+Validate 9 Kubernetes manifests
+   ↓
+PASS or FAIL
+
+
+Expected Success Result
+------------------------------------------------------------
+
+Expected summary:
+
+Summary: 9 resources found in 9 files - Valid: 9, Invalid: 0, Errors: 0, Skipped: 0
+
+
+Failure Behavior
+------------------------------------------------------------
+
+If a manifest fails schema validation, Kubeconform exits unsuccessfully.
+
+GitHub Actions then marks the validation step as failed.
+
+The CI job also fails.
+
+This prevents an invalid manifest from silently progressing toward container
+publication or deployment.
+
+
+Important Boundary
+------------------------------------------------------------
+
+Kubeconform performs schema validation.
+
+It does NOT connect to the HavenBridge Kubernetes API server.
+
+Therefore this stage does NOT prove that every admission controller,
+installed CRD, policy, or runtime condition in the real cluster will accept
+the manifest.
+
+Cluster-side validation can be performed later during deployment or
+integration validation.
+
+
+Security Boundary
+------------------------------------------------------------
+
+This validation requires no:
+
+kubeconfig
+Kubernetes credentials
+SSH access
+PostgreSQL password
+homelab network access
+Traefik access
+MetalLB access
+NFS access
+
+
+Success Criteria
+------------------------------------------------------------
+
+Validation succeeds when:
+
+Kubeconform v0.8.0 installs successfully.
+All 9 manifest files are discovered.
+All 9 resources are validated.
+Valid = 9.
+Invalid = 0.
+Errors = 0.
+Skipped = 0.
+The GitHub Actions job reports success.
