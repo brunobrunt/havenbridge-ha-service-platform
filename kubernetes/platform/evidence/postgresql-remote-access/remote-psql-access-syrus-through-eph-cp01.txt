@@ -1,0 +1,181 @@
+HavenBridge PostgreSQL Remote Client Validation
+----------------------------------------------
+
+Purpose
+-------
+This file documents successful access from the syrus workstation to the
+HavenBridge PostgreSQL database running inside the Kubernetes pod
+havenbridge-postgres-0.
+
+Connection Path
+---------------
+Valentina Studio / psql on syrus
+        |
+        | 127.0.0.1:15432
+        v
+SSH tunnel to eph-cp01
+        |
+        | kubectl port-forward
+        v
+havenbridge-postgres-0:5432
+
+Kubernetes Namespace
+--------------------
+havenbridge
+
+PostgreSQL Pod
+--------------
+havenbridge-postgres-0
+
+PostgreSQL Database
+-------------------
+havenbridge
+
+PostgreSQL User
+---------------
+havenbridge_admin
+
+Local Client Host
+-----------------
+127.0.0.1
+
+Local Forwarded Port
+--------------------
+15432
+
+1. Start the SSH Tunnel and Kubernetes Port Forward
+---------------------------------------------------
+
+Option A — Foreground Tunnel
+----------------------------
+
+Use this when you want to keep the SSH tunnel visible in the terminal:
+
+ssh -i /home/alabi/.ssh/eph_k8s \
+  -L 15432:127.0.0.1:15432 \
+  mino@172.16.10.31 \
+  'kubectl port-forward -n havenbridge pod/havenbridge-postgres-0 15432:5432 --address 127.0.0.1'
+
+
+Option B — Background Tunnel
+----------------------------
+
+Use this when you want SSH to move into the background after the tunnel is
+established:
+
+ssh -f \
+  -i /home/alabi/.ssh/eph_k8s \
+  -L 15432:127.0.0.1:15432 \
+  -o ExitOnForwardFailure=yes \
+  mino@172.16.10.31 \
+  'kubectl port-forward -n havenbridge pod/havenbridge-postgres-0 15432:5432 --address 127.0.0.1'
+
+What this command does:
+- SSH connects from syrus to eph-cp01.
+- The local port 15432 on syrus is forwarded through SSH.
+- kubectl port-forward on eph-cp01 forwards port 15432 to PostgreSQL port
+  5432 inside havenbridge-postgres-0.
+- PostgreSQL remains unexposed to the LAN because access is carried through
+  the SSH tunnel.
+
+2. Validate PostgreSQL Access from syrus
+----------------------------------------
+Run:
+
+psql -h 127.0.0.1 -p 15432 \
+  -U havenbridge_admin \
+  -d havenbridge
+
+Flag explanation:
+- -h 127.0.0.1
+  Connect to the local loopback interface on syrus. The SSH tunnel is
+  listening here.
+
+- -p 15432
+  Connect to local TCP port 15432 rather than PostgreSQL's normal port 5432.
+  Port 15432 is the local end of the SSH tunnel.
+
+- -U havenbridge_admin
+  Authenticate using the PostgreSQL role havenbridge_admin.
+
+- -d havenbridge
+  Connect directly to the havenbridge database.
+
+Observed Successful Connection
+------------------------------
+Command:
+
+psql -h 127.0.0.1 -p 15432 \
+  -U havenbridge_admin \
+  -d havenbridge
+
+Observed output:
+
+Password for user havenbridge_admin:
+psql (18.4 (Ubuntu 18.4-1.pgdg24.04+1), server 18.3 (Debian 18.3-1.pgdg13+1))
+Type "help" for help.
+
+havenbridge=#
+
+This confirms:
+- The SSH tunnel from syrus to eph-cp01 is working.
+- The kubectl port-forward to havenbridge-postgres-0 is working.
+- PostgreSQL is reachable through TCP.
+- Authentication for havenbridge_admin succeeded.
+- The havenbridge database is accessible remotely from syrus.
+
+3. Validate Available Databases
+-------------------------------
+From the PostgreSQL prompt, run:
+
+\l
+
+Observed output:
+
+                                                                   List of databases
+    Name     |       Owner       | Encoding | Locale Provider |  Collate   |   Ctype    | Locale | ICU Rules |            Access privileges
+-------------+-------------------+----------+-----------------+------------+------------+--------+-----------+-----------------------------------------
+ havenbridge | havenbridge_admin | UTF8     | libc            | en_US.utf8 | en_US.utf8 |        |           |
+ postgres    | havenbridge_admin | UTF8     | libc            | en_US.utf8 | en_US.utf8 |        |           |
+ template0   | havenbridge_admin | UTF8     | libc            | en_US.utf8 | en_US.utf8 |        |           | =c/havenbridge_admin                   +
+             |                   |          |                 |            |            |        |           | havenbridge_admin=CTc/havenbridge_admin
+ template1   | havenbridge_admin | UTF8     | libc            | en_US.utf8 | en_US.utf8 |        |           | =c/havenbridge_admin                   +
+             |                   |          |                 |            |            |        |           | havenbridge_admin=CTc/havenbridge_admin
+(4 rows)
+
+Validation Result
+-----------------
+PASS
+
+The HavenBridge PostgreSQL service running in havenbridge-postgres-0 can be
+accessed securely from syrus through eph-cp01 using SSH tunneling and
+kubectl port-forward.
+
+The database list confirms that:
+- havenbridge exists.
+- havenbridge is owned by havenbridge_admin.
+- postgres is also owned by havenbridge_admin.
+- PostgreSQL system template databases template0 and template1 are present.
+
+Valentina Studio Connection Settings
+------------------------------------
+Host:      127.0.0.1
+Port:      15432
+Database:  havenbridge
+User:      havenbridge_admin
+Password:  Use the current HavenBridge PostgreSQL password
+
+
+Verify on Syrus
+ss -lntp | grep 15432
+
+
+Security Note
+-------------
+Do not store the PostgreSQL password in this evidence file.
+
+The database is intentionally accessed through an SSH tunnel instead of
+exposing PostgreSQL port 5432 directly to the network.
+
+End of Validation
+-----------------

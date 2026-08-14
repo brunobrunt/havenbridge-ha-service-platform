@@ -1,0 +1,511 @@
+HavenBridge PostgreSQL Persistent Administrative Access Services
+================================================================
+
+Purpose
+-------
+This document explains the two systemd services created to provide persistent,
+secure administrative access from syrus to the HavenBridge PostgreSQL database
+running inside Kubernetes.
+
+The design avoids exposing PostgreSQL directly to the LAN and removes the need
+to manually keep terminal sessions open.
+
+End-to-End Traffic Flow
+-----------------------
+Valentina Studio / psql on syrus
+        |
+        | localhost:25432
+        v
+systemd SSH tunnel on syrus
+        |
+        | encrypted SSH connection
+        v
+eph-cp01 127.0.0.1:25432
+        |
+        | systemd-managed kubectl port-forward
+        v
+havenbridge-postgres-0:5432
+
+There are TWO services because each service owns a different part of the path.
+
+========================================================================
+SERVICE 1 - eph-cp01
+========================================================================
+
+Service Name
+------------
+havenbridge-postgres-portforward.service
+
+Service File
+------------
+/etc/systemd/system/havenbridge-postgres-portforward.service
+
+Host
+----
+eph-cp01
+
+Purpose
+-------
+This service maintains the Kubernetes port-forward between eph-cp01 and the
+PostgreSQL pod.
+
+It replaces the manual command:
+
+kubectl port-forward -n havenbridge \
+  pod/havenbridge-postgres-0 \
+  25432:5432 \
+  --address 127.0.0.1
+
+Without systemd, this command would normally remain attached to the terminal.
+Closing the terminal or ending the session could stop the port-forward.
+
+What It Provides
+----------------
+eph-cp01:
+
+127.0.0.1:25432
+        |
+        | kubectl port-forward
+        v
+havenbridge-postgres-0:5432
+
+The PostgreSQL container continues to use its normal PostgreSQL port:
+
+5432
+
+Port 25432 is only the administrative forwarding port chosen for this project.
+
+Why It Binds to 127.0.0.1
+-------------------------
+The service uses:
+
+--address=127.0.0.1
+
+This means the forwarded PostgreSQL port is only reachable from eph-cp01
+itself.
+
+It is NOT directly exposed to:
+
+- the home LAN
+- other Kubernetes nodes
+- other machines on the network
+- the Internet
+
+This is an intentional security control.
+
+Service Configuration
+---------------------
+[Unit]
+Description=HavenBridge PostgreSQL Kubernetes Port Forward
+Documentation=https://kubernetes.io/docs/reference/kubectl/generated/kubectl_port-forward/
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=mino
+Environment=KUBECONFIG=/home/mino/.kube/config
+
+ExecStart=/usr/bin/kubectl port-forward \
+    -n havenbridge \
+    pod/havenbridge-postgres-0 \
+    25432:5432 \
+    --address=127.0.0.1
+
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+
+Important Fields
+----------------
+User=mino
+
+Runs kubectl as the mino Linux user rather than root.
+
+Environment=KUBECONFIG=/home/mino/.kube/config
+
+Explicitly tells kubectl where the Kubernetes client configuration is stored.
+
+Restart=always
+
+If kubectl port-forward exits, systemd attempts to start it again.
+
+RestartSec=5
+
+Waits five seconds before restarting the failed process.
+
+WantedBy=multi-user.target
+
+Allows the service to be enabled so it starts automatically during normal
+system boot.
+
+Management Commands
+-------------------
+Reload systemd after creating or modifying the unit:
+
+sudo systemctl daemon-reload
+
+Start:
+
+sudo systemctl start havenbridge-postgres-portforward.service
+
+Stop:
+
+sudo systemctl stop havenbridge-postgres-portforward.service
+
+Restart:
+
+sudo systemctl restart havenbridge-postgres-portforward.service
+
+Enable at boot:
+
+sudo systemctl enable havenbridge-postgres-portforward.service
+
+Check whether it is enabled:
+
+sudo systemctl is-enabled havenbridge-postgres-portforward.service
+
+Check status:
+
+sudo systemctl status havenbridge-postgres-portforward.service
+
+View logs:
+
+sudo journalctl -u havenbridge-postgres-portforward.service
+
+Follow logs:
+
+sudo journalctl -u havenbridge-postgres-portforward.service -f
+
+Validate listening port:
+
+ss -lntp | grep 25432
+
+Expected listener:
+
+127.0.0.1:25432
+
+========================================================================
+SERVICE 2 - syrus
+========================================================================
+
+Service Name
+------------
+havenbridge-postgres-ssh-tunnel.service
+
+Service File
+------------
+/etc/systemd/system/havenbridge-postgres-ssh-tunnel.service
+
+Host
+----
+syrus
+
+Purpose
+-------
+This service maintains the SSH tunnel between syrus and eph-cp01.
+
+Valentina Studio and psql run on syrus, so they need something listening on:
+
+127.0.0.1:25432
+
+The eph-cp01 systemd service does NOT create a listener on syrus.
+
+This second service solves that problem.
+
+It replaces the manual SSH command:
+
+ssh -fN \
+  -i /home/alabi/.ssh/eph_k8s \
+  -L 25432:127.0.0.1:25432 \
+  -o ExitOnForwardFailure=yes \
+  mino@172.16.10.31
+
+What It Provides
+----------------
+syrus:
+
+127.0.0.1:25432
+        |
+        | SSH tunnel
+        v
+eph-cp01:
+127.0.0.1:25432
+
+The eph-cp01 service then forwards the connection onward to:
+
+havenbridge-postgres-0:5432
+
+Why a Second Service Is Necessary
+---------------------------------
+127.0.0.1 always means:
+
+"this machine"
+
+Therefore:
+
+127.0.0.1 on syrus
+is NOT the same interface as
+127.0.0.1 on eph-cp01.
+
+Valentina Studio connects to localhost on syrus.
+
+The syrus systemd service provides the missing connection between:
+
+syrus localhost:25432
+and
+eph-cp01 localhost:25432
+
+Service Configuration
+---------------------
+[Unit]
+Description=HavenBridge PostgreSQL SSH Tunnel to eph-cp01
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=alabi
+Environment=HOME=/home/alabi
+
+ExecStart=/usr/bin/ssh \
+    -N \
+    -T \
+    -i /home/alabi/.ssh/eph_k8s \
+    -L 127.0.0.1:25432:127.0.0.1:25432 \
+    -o ExitOnForwardFailure=yes \
+    -o ServerAliveInterval=30 \
+    -o ServerAliveCountMax=3 \
+    -o BatchMode=yes \
+    -o StrictHostKeyChecking=yes \
+    mino@172.16.10.31
+
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+
+Important Fields and SSH Options
+--------------------------------
+User=alabi
+
+Runs the SSH tunnel as the Linux account that owns the SSH key and known_hosts
+configuration.
+
+-N
+
+Do not execute a remote shell command. The SSH connection is used only for
+port forwarding.
+
+-T
+
+Do not allocate a pseudo-terminal.
+
+-i /home/alabi/.ssh/eph_k8s
+
+Use the HavenBridge SSH private key.
+
+-L 127.0.0.1:25432:127.0.0.1:25432
+
+Create this path:
+
+syrus 127.0.0.1:25432
+        |
+        | SSH
+        v
+eph-cp01 127.0.0.1:25432
+
+ExitOnForwardFailure=yes
+
+Do not leave the SSH process running if the requested forwarding listener
+cannot be created.
+
+ServerAliveInterval=30
+
+Send a keepalive check every 30 seconds.
+
+ServerAliveCountMax=3
+
+If the remote side fails to respond to several keepalive checks, SSH exits.
+systemd can then restart it.
+
+BatchMode=yes
+
+Prevents SSH from waiting for interactive password or passphrase prompts.
+
+StrictHostKeyChecking=yes
+
+Requires eph-cp01 to already exist in the user's SSH known_hosts file and
+protects against silently accepting an unexpected host key.
+
+Restart=always
+
+If the SSH tunnel exits, systemd automatically starts it again.
+
+RestartSec=10
+
+Wait ten seconds before attempting the restart.
+
+Management Commands
+-------------------
+Reload systemd after creating or modifying the unit:
+
+sudo systemctl daemon-reload
+
+Start:
+
+sudo systemctl start havenbridge-postgres-ssh-tunnel.service
+
+Stop:
+
+sudo systemctl stop havenbridge-postgres-ssh-tunnel.service
+
+Restart:
+
+sudo systemctl restart havenbridge-postgres-ssh-tunnel.service
+
+Enable at boot:
+
+sudo systemctl enable havenbridge-postgres-ssh-tunnel.service
+
+Check whether it is enabled:
+
+sudo systemctl is-enabled havenbridge-postgres-ssh-tunnel.service
+
+Check status:
+
+sudo systemctl status havenbridge-postgres-ssh-tunnel.service
+
+View logs:
+
+sudo journalctl -u havenbridge-postgres-ssh-tunnel.service
+
+Follow logs:
+
+sudo journalctl -u havenbridge-postgres-ssh-tunnel.service -f
+
+Validate listening port:
+
+ss -lntp | grep 25432
+
+Expected listener:
+
+127.0.0.1:25432
+
+========================================================================
+CLIENT ACCESS
+========================================================================
+
+psql from syrus
+----------------
+psql -h 127.0.0.1 -p 25432 \
+  -U havenbridge_admin \
+  -d havenbridge
+
+Valentina Studio
+----------------
+Host:      127.0.0.1
+Port:      25432
+Database:  havenbridge
+User:      havenbridge_admin
+Password:  Current HavenBridge PostgreSQL password
+SSL:       Disabled for this local SSH-tunneled administrative connection
+
+========================================================================
+WHY THIS DESIGN WAS CHOSEN
+========================================================================
+
+1. PostgreSQL remains private
+-----------------------------
+PostgreSQL port 5432 is not exposed directly to the LAN.
+
+2. kubectl port-forward remains loopback-only
+---------------------------------------------
+eph-cp01 listens only on 127.0.0.1:25432.
+
+3. SSH provides the remote transport
+------------------------------------
+The connection between syrus and eph-cp01 is encrypted by SSH.
+
+4. Valentina Studio uses localhost
+----------------------------------
+Valentina Studio does not need direct network access to the Kubernetes node or
+PostgreSQL pod.
+
+5. No interactive terminals are required
+----------------------------------------
+Both forwarding processes are managed by systemd.
+
+6. Automatic recovery
+---------------------
+If either kubectl port-forward or SSH exits unexpectedly, systemd attempts to
+restart the relevant service.
+
+7. Boot persistence
+-------------------
+When both services are enabled, the forwarding path can return automatically
+after system reboot.
+
+8. Clear separation of responsibilities
+----------------------------------------
+syrus service:
+    Client-side encrypted transport.
+
+eph-cp01 service:
+    Kubernetes-side port forwarding.
+
+Kubernetes:
+    PostgreSQL workload remains on its native port 5432.
+
+========================================================================
+FINAL ARCHITECTURE
+========================================================================
+
++------------------------- syrus --------------------------+
+|                                                          |
+| Valentina Studio / psql                                  |
+|          |                                               |
+|          | 127.0.0.1:25432                               |
+|          v                                               |
+| havenbridge-postgres-ssh-tunnel.service                  |
++----------|-----------------------------------------------+
+           |
+           | SSH
+           v
++----------------------- eph-cp01 -------------------------+
+|                                                          |
+| 127.0.0.1:25432                                          |
+|          |                                               |
+|          v                                               |
+| havenbridge-postgres-portforward.service                 |
+|          |                                               |
+|          | kubectl port-forward                          |
++----------|-----------------------------------------------+
+           |
+           v
++---------------------- Kubernetes ------------------------+
+|                                                          |
+| havenbridge-postgres-0:5432                              |
+|                                                          |
++----------------------------------------------------------+
+
+Security Summary
+----------------
+The database is not exposed directly to the local network.
+
+The administrative path requires:
+
+1. Access to syrus.
+2. The local SSH private key.
+3. Successful SSH authentication to eph-cp01.
+4. Access through eph-cp01's local-only kubectl port-forward.
+5. Valid PostgreSQL credentials.
+
+This provides a more controlled administrative access path than exposing
+PostgreSQL with a NodePort, LoadBalancer, or LAN-facing port-forward.
+
+End of Document
+---------------
