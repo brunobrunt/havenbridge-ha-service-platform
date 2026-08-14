@@ -151,3 +151,4 @@ def root() -> dict[str, str]:
         "liveness": "/health/live",
         "readiness": "/health/ready",
     }
+# CI change-detection positive validation marker.
