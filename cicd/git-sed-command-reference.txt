@@ -1,0 +1,682 @@
+HavenBridge Git and sed Command Reference
+=========================================
+
+Purpose
+-------
+
+This file collects the Git and sed commands used or documented so far during
+the HavenBridge project.
+
+Project root:
+
+    /home/alabi/projects/havenbridge-ha-service-platform
+
+
+PART 1 — GIT COMMANDS
+=====================
+
+1. Configure Git user name
+
+    git config user.name "Adeola Alabi"
+
+Meaning:
+    Sets the Git author name for the current repository.
+
+Key parts:
+    git         Git command-line program.
+    config      Read or change Git configuration.
+    user.name   Git author-name setting.
+
+
+2. Configure Git user email
+
+    git config user.email "adeolaalabie@gmail.com"
+
+Meaning:
+    Sets the Git author email for the current repository.
+
+Key part:
+    user.email  Git author-email setting.
+
+
+3. Display configured Git user name
+
+    git config user.name
+
+Meaning:
+    Prints the configured author name.
+
+
+4. Display configured Git user email
+
+    git config user.email
+
+Meaning:
+    Prints the configured author email.
+
+
+5. Check repository status
+
+    git status --short
+
+Meaning:
+    Shows modified, staged, deleted, and untracked files in compact form.
+
+Flag:
+    --short     Use Git's short status format.
+
+Common output:
+    ?? file     Untracked file/directory.
+     M file     Modified but not staged.
+    M  file     Modified and staged.
+    A  file     New file staged for addition.
+
+
+6. Check unstaged changes for whitespace/conflict-marker problems
+
+    git diff --check
+
+Meaning:
+    Checks unstaged tracked changes for whitespace errors and suspicious
+    conflict-marker lines.
+
+Flag:
+    --check     Report whitespace errors and possible leftover conflict markers.
+
+Successful result:
+    No output.
+
+
+7. Show unstaged tracked changes
+
+    git diff
+
+Meaning:
+    Shows line-by-line changes that have not yet been staged.
+
+
+8. Show changes for specific paths
+
+    git diff -- .github/workflows/ci.yml
+
+Also used:
+
+    git diff -- \
+      .github/workflows/ci.yml \
+      cicd/README.md \
+      cicd/github-actions-simple-concepts.txt
+
+Meaning:
+    Shows changes only for paths listed after --.
+
+Syntax:
+    --          Separates Git options/revisions from path names.
+
+
+9. Show a summary of unstaged changes
+
+    git diff --stat
+
+Meaning:
+    Shows changed filenames and approximate insertion/deletion counts.
+
+Flag:
+    --stat      Show summary statistics instead of the full diff.
+
+
+10. Show staged changes
+
+    git diff --cached
+
+Meaning:
+    Shows exactly what is currently staged for the next commit.
+
+Flag:
+    --cached    Compare the staging area with HEAD.
+
+Equivalent:
+    git diff --staged
+
+
+11. Check staged changes
+
+    git diff --cached --check
+
+Meaning:
+    Checks staged content for whitespace problems and possible conflict markers.
+
+Flags:
+    --cached    Inspect staged changes.
+    --check     Report whitespace/conflict-marker problems.
+
+Successful result:
+    No output.
+
+
+12. Show a summary of staged changes
+
+    git diff --cached --stat
+
+Meaning:
+    Shows a compact summary of staged files and line counts.
+
+Flags:
+    --cached    Inspect staged changes.
+    --stat      Show summary statistics.
+
+
+13. Stage one file
+
+    git add README.md
+
+    git add .github/workflows/ci.yml
+
+Meaning:
+    Adds the selected file's current contents to the staging area.
+
+
+14. Stage multiple specific files
+
+    git add \
+      cicd/evidence/docker-build/github-actions-docker-build-validation-steps.txt \
+      cicd/evidence/docker-build/github-actions-docker-build-validation-results.txt
+
+Also used:
+
+    git add \
+      cicd/evidence/ghcr-publication/gha-ghcr-publication-steps.txt \
+      cicd/evidence/ghcr-publication/gha-ghcr-publication-results.txt
+
+Meaning:
+    Stages only the files explicitly listed.
+
+
+15. Stage a directory
+
+    git add \
+      /home/alabi/projects/havenbridge-ha-service-platform/cicd/evidence/k8s-manifest-validation/
+
+Meaning:
+    Stages changes under the specified directory.
+
+HavenBridge habit:
+    Prefer staging intended files/directories instead of blindly using
+    "git add .".
+
+
+16. Create a commit
+
+General form:
+
+    git commit -m "commit message"
+
+Flag:
+    -m          Supply the commit message on the command line.
+
+Examples used:
+
+    git commit -m "Document platform routing and persistent storage"
+
+    git commit -m "ci: validate HavenBridge API Docker build"
+
+    git commit -m "docs: add GitHub Actions learning notes"
+
+    git commit -m "docs: record Docker build CI validation"
+
+    git commit -m "ci: add Kubernetes manifest validation"
+
+    git commit -m "docs: record Kubernetes manifest CI validation"
+
+    git commit -m "docs: add GHCR and container versioning strategy"
+
+    git commit -m "ci: publish HavenBridge API image to GHCR"
+
+    git commit -m "docs: record GHCR publication validation"
+
+Commit prefixes used:
+    ci:         CI/CD implementation change.
+    docs:       Documentation/evidence change.
+
+
+17. Push local commits to GitHub
+
+    git push origin main
+
+Meaning:
+    Push local commits to the remote named "origin", branch "main".
+
+Parts:
+    push        Send commits to a remote.
+    origin      Conventional name of the primary remote repository.
+    main        Destination branch.
+
+Possible output:
+    Everything up-to-date
+
+Meaning:
+    The remote already has all local commits.
+
+
+18. View recent commit history
+
+Used forms:
+
+    git log -2 --oneline
+    git log -3 --oneline
+    git log -4 --oneline
+    git log -5 --oneline
+
+Meaning:
+    Shows recent commits in compact form.
+
+Flags:
+    -2/-3/-4/-5
+        Limit output to that many commits.
+
+    --oneline
+        Show one commit per line as short-SHA + commit message.
+
+
+19. Resolve a short SHA to the full SHA
+
+    git rev-parse c521844
+
+Meaning:
+    Resolves the abbreviated revision to its full object ID.
+
+Example result:
+
+    c52184422d0a53e07ac399df3fce4913b32becb2
+
+Command part:
+    rev-parse   Parse and resolve Git revisions.
+
+
+20. Lightweight secret scan of staged changes
+
+    git diff --cached | grep -Ei \
+      'BEGIN (OPENSSH|RSA|EC|DSA) PRIVATE KEY|certificate-key|token:|password:' \
+      && echo "Review possible secret before committing" \
+      || echo "No obvious secrets found"
+
+Git part:
+    git diff --cached
+        Prints staged changes.
+
+Shell pipe:
+    |
+        Sends output to grep.
+
+grep flags:
+    -E          Extended regular expressions.
+    -i          Case-insensitive matching.
+
+Purpose:
+    Quick scan for obvious private keys, tokens, and passwords.
+
+Important:
+    This is a lightweight check, not a replacement for a dedicated secret
+    scanner.
+
+
+21. Typical HavenBridge Git safety flow
+
+    cd /home/alabi/projects/havenbridge-ha-service-platform
+
+    git status --short
+
+    git diff --check
+
+    git diff -- <file>
+
+    git add <file-or-directory>
+
+    git diff --cached --check
+
+    git diff --cached --stat
+
+    git commit -m "type: meaningful message"
+
+    git push origin main
+
+    git status --short
+
+
+PART 2 — SED COMMANDS
+=====================
+
+22. What sed is
+
+sed means:
+    stream editor
+
+We have mainly used it to:
+    - print selected sections of YAML files;
+    - make YAML spaces visible;
+    - replace heading separator lines.
+
+
+23. Print a specific range of lines
+
+General pattern:
+
+    sed -n 'START,ENDp' <file>
+
+Meaning:
+    Print only lines START through END.
+
+Flag:
+    -n          Suppress sed's normal automatic output.
+
+Expression:
+    START,ENDp
+        START,END selects the range.
+        p means print.
+
+
+Examples used:
+
+    sed -n '28,50p' \
+      /home/alabi/projects/havenbridge-ha-service-platform/.github/workflows/ci.yml
+
+    sed -n '35,80p' \
+      /home/alabi/projects/havenbridge-ha-service-platform/.github/workflows/ci.yml
+
+    sed -n '30,80p' \
+      /home/alabi/projects/havenbridge-ha-service-platform/.github/workflows/ci.yml
+
+    sed -n '10,25p' \
+      /home/alabi/projects/havenbridge-ha-service-platform/.github/workflows/ci.yml
+
+    sed -n '55,95p' \
+      /home/alabi/projects/havenbridge-ha-service-platform/.github/workflows/ci.yml
+
+    sed -n '68,90p' \
+      /home/alabi/projects/havenbridge-ha-service-platform/.github/workflows/ci.yml
+
+    sed -n '68,105p' \
+      /home/alabi/projects/havenbridge-ha-service-platform/.github/workflows/ci.yml
+
+    sed -n '68,115p' \
+      /home/alabi/projects/havenbridge-ha-service-platform/.github/workflows/ci.yml
+
+    sed -n '20,65p' \
+      /home/alabi/projects/havenbridge-ha-service-platform/.github/workflows/ci.yml
+
+
+24. Make spaces visible
+
+Command used:
+
+    sed -n '30,80p' \
+      /home/alabi/projects/havenbridge-ha-service-platform/.github/workflows/ci.yml \
+      | sed 's/ /·/g'
+
+Purpose:
+    Makes YAML indentation visible.
+
+Second sed expression:
+
+    s/ /·/g
+
+Meaning:
+    s           Substitute.
+    first / /   Match a normal space.
+    /·/         Replace it with a visible middle dot.
+    g           Replace every match on each line.
+
+Example:
+
+    Before:
+          - name: Run tests
+
+    After:
+    ······-·name:·Run·tests
+
+
+25. Edit files in place with sed
+
+Command used:
+
+    sed -i -E 's/^=+$/------------------------------------------------------------/' \
+      /home/alabi/projects/havenbridge-ha-service-platform/cicd/evidence/k8s-manifest-validation/gha-k8s-manifest-validation-steps.txt \
+      /home/alabi/projects/havenbridge-ha-service-platform/cicd/evidence/k8s-manifest-validation/gha-k8s-manifest-validation-results.txt
+
+Purpose:
+    Replace lines made entirely of "=" characters with dashed separators.
+
+Reason:
+    git diff --cached --check interpreted long "=" lines as possible leftover
+    conflict markers.
+
+Flags:
+    -i          Edit the original files in place.
+    -E          Use extended regular expressions.
+
+Expression:
+
+    s/^=+$/------------------------------------------------------------/
+
+Meaning:
+    s/          Start substitution.
+    ^           Beginning of line.
+    =+          One or more "=" characters.
+    $           End of line.
+
+Therefore:
+
+    ^=+$
+
+means:
+    A line containing only one or more equals signs.
+
+
+26. General sed substitution pattern
+
+    sed 's/SEARCH/REPLACEMENT/' file
+
+Meaning:
+    Replace the first SEARCH match on each line.
+
+To replace every match on each line:
+
+    sed 's/SEARCH/REPLACEMENT/g' file
+
+The final:
+    g           Global replacement on each line.
+
+
+27. sed safety habit
+
+Preview first:
+
+    sed -n 'START,ENDp' <file>
+
+or run a substitution without -i.
+
+Use:
+
+    sed -i ...
+
+only when you intend to change the original file.
+
+
+PART 3 — SHELL SYNTAX SEEN WITH GIT AND SED
+============================================
+
+28. Backslash line continuation
+
+Example:
+
+    git add \
+      file1 \
+      file2
+
+Meaning:
+    A trailing backslash continues the same shell command on the next line.
+
+
+29. Pipe
+
+Symbol:
+
+    |
+
+Example:
+
+    git diff --cached | grep -Ei 'password:|token:'
+
+Meaning:
+    Send standard output from the left command into the right command.
+
+
+30. && operator
+
+    command1 && command2
+
+Meaning:
+    Run command2 only if command1 succeeds.
+
+
+31. || operator
+
+    command1 || command2
+
+Meaning:
+    Run command2 only if command1 fails.
+
+
+32. Quoting
+
+Single quotes:
+
+    'text'
+
+Generally prevent shell variable expansion.
+
+Example:
+
+    sed -n '35,80p'
+
+
+Double quotes:
+
+    "text"
+
+Allow shell variables to expand.
+
+Example:
+
+    "$HOME"
+
+
+PART 4 — QUICK CHEAT SHEET
+==========================
+
+Git:
+
+    git status --short
+        Compact repository status.
+
+    git diff
+        Show unstaged tracked changes.
+
+    git diff --check
+        Check unstaged changes for whitespace/conflict-marker problems.
+
+    git diff -- <file>
+        Show unstaged changes for a specific path.
+
+    git diff --stat
+        Summarize unstaged changes.
+
+    git add <file>
+        Stage a file.
+
+    git add <directory>/
+        Stage changes under a directory.
+
+    git diff --cached
+        Show staged changes.
+
+    git diff --cached --check
+        Check staged changes.
+
+    git diff --cached --stat
+        Summarize staged changes.
+
+    git commit -m "message"
+        Create a commit.
+
+    git push origin main
+        Push local main commits to GitHub.
+
+    git log -3 --oneline
+        Show the latest three commits compactly.
+
+    git rev-parse <short-SHA>
+        Resolve a revision to a full SHA.
+
+    git config user.name
+        Show configured author name.
+
+    git config user.email
+        Show configured author email.
+
+
+sed:
+
+    sed -n '20,40p' file
+        Print only lines 20 through 40.
+
+    sed 's/old/new/' file
+        Replace the first match per line in output.
+
+    sed 's/old/new/g' file
+        Replace every match per line in output.
+
+    sed -i 's/old/new/g' file
+        Modify the original file in place.
+
+    sed -E '...'
+        Use extended regular expressions.
+
+    sed 's/ /·/g'
+        Make spaces visible.
+
+
+PART 5 — HAVENBRIDGE PRE-COMMIT MEMORY FLOW
+===========================================
+
+    What changed?
+        ↓
+    git status --short
+
+    Inspect it
+        ↓
+    git diff
+
+    Check it
+        ↓
+    git diff --check
+
+    Stage only intended files
+        ↓
+    git add ...
+
+    Check exactly what is staged
+        ↓
+    git diff --cached --check
+    git diff --cached --stat
+
+    Save the milestone
+        ↓
+    git commit -m "..."
+
+    Publish Git history
+        ↓
+    git push origin main
+
+    Confirm clean state
+        ↓
+    git status --short

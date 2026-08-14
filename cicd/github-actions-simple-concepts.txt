@@ -1346,3 +1346,169 @@ Therefore the same image may eventually have:
     <Git-SHA>
         =
     exact source-code revision
+
+
+38. Detecting HavenBridge API Changes
+-------------------------------------
+
+The HavenBridge CI workflow now checks whether files under:
+
+    applications/havenbridge-api/
+
+changed during a push.
+
+This prevents documentation-only or unrelated repository changes from
+publishing a new HavenBridge API container image.
+
+
+Git History
+-----------
+
+The checkout step uses:
+
+    with:
+      fetch-depth: 0
+
+This gives the runner enough Git history to compare the commit before the push
+with the new commit.
+
+
+Change Detection
+----------------
+
+The workflow runs:
+
+    git diff --name-only "${{ github.event.before }}" "${{ github.sha }}"
+
+This asks Git:
+
+    "Which files changed between the previous commit and the current commit?"
+
+
+github.event.before
+-------------------
+
+    github.event.before
+
+represents the Git commit before the push.
+
+
+github.sha
+----------
+
+    github.sha
+
+represents the current Git commit associated with the workflow run.
+
+
+Filtering for the API
+---------------------
+
+The changed-file list is checked using:
+
+    grep -q '^applications/havenbridge-api/'
+
+Meaning:
+
+    Look for any changed path beginning with:
+
+    applications/havenbridge-api/
+
+
+Possible Results
+----------------
+
+If an API file changed:
+
+    changed=true
+
+If no API file changed:
+
+    changed=false
+
+
+GITHUB_OUTPUT
+-------------
+
+The detector writes its result to:
+
+    $GITHUB_OUTPUT
+
+For example:
+
+    echo "changed=true" >> "$GITHUB_OUTPUT"
+
+Because the step has:
+
+    id: api_changes
+
+later workflow steps can read the result as:
+
+    steps.api_changes.outputs.changed
+
+
+Conditional GHCR Publication
+----------------------------
+
+The GHCR login, tag, and push steps use:
+
+    if: github.event_name == 'push' &&
+        github.ref == 'refs/heads/main' &&
+        steps.api_changes.outputs.changed == 'true'
+
+In plain English:
+
+    Was this a push?
+        AND
+    Was the push to main?
+        AND
+    Did the HavenBridge API change?
+
+Only when all three answers are YES does GHCR publication occur.
+
+
+Expected Behavior
+-----------------
+
+Documentation-only change:
+
+    git push
+        ↓
+    CI runs
+        ↓
+    API changed=false
+        ↓
+    GHCR login    SKIPPED
+    GHCR tag      SKIPPED
+    GHCR push     SKIPPED
+
+
+HavenBridge API change:
+
+    applications/havenbridge-api/... changed
+        ↓
+    CI runs
+        ↓
+    API changed=true
+        ↓
+    GHCR login    RUN
+    GHCR tag      RUN
+    GHCR push     RUN
+
+
+Important Distinction
+---------------------
+
+CI validation still runs broadly.
+
+Only container publication is conditional.
+
+Therefore HavenBridge continues to run:
+
+    FastAPI tests
+    Docker build validation
+    Kubernetes manifest validation
+
+even when the API itself did not change.
+
+This keeps CI validation separate from artifact publication.
