@@ -1,0 +1,359 @@
+GitHub Actions GHCR Change-Detection Validation Results
+-------------------------------------------------------
+
+Overall Validation Status
+-------------------------
+
+SUCCESS
+
+
+Purpose
+-------
+
+Record the actual negative and positive validation results for conditional
+HavenBridge API image publication to GitHub Container Registry.
+
+
+Validated Path
+--------------
+
+The workflow monitors:
+
+    applications/havenbridge-api/
+
+
+NEGATIVE TEST
+-------------
+
+Test Purpose
+------------
+
+Verify that a repository change outside:
+
+    applications/havenbridge-api/
+
+does not cause a new HavenBridge API image to be published.
+
+
+Observed Result
+---------------
+
+The GitHub Actions workflow completed successfully.
+
+The following steps ran successfully:
+
+    Checkout repository                         PASS
+
+    Detect HavenBridge API changes             PASS
+
+    Set up Python 3.12                          PASS
+
+    Install Python dependencies                 PASS
+
+    Run HavenBridge API tests                   PASS
+
+    Build HavenBridge API Docker image          PASS
+
+    Install Kubeconform                         PASS
+
+    Validate HavenBridge Kubernetes manifests   PASS
+
+
+The following publication steps were skipped:
+
+    Log in to GitHub Container Registry         SKIPPED
+
+    Tag HavenBridge API image for GHCR          SKIPPED
+
+    Push HavenBridge API image to GHCR          SKIPPED
+
+
+Negative Test Interpretation
+----------------------------
+
+No files under:
+
+    applications/havenbridge-api/
+
+changed.
+
+The change detector therefore produced:
+
+    changed=false
+
+Conceptually:
+
+    Repository change
+        ↓
+    API did not change
+        ↓
+    CI validation continued
+        ↓
+    GHCR publication skipped
+
+
+Negative Test Result
+--------------------
+
+Normal CI validation continued               YES
+
+Application change detected                  NO
+
+GHCR login executed                          NO
+
+GHCR image tag executed                      NO
+
+GHCR push executed                           NO
+
+Workflow remained successful                 YES
+
+Negative test                                PASS
+
+
+POSITIVE TEST
+-------------
+
+Test Purpose
+------------
+
+Verify that a real change under:
+
+    applications/havenbridge-api/
+
+causes the GHCR publication path to execute.
+
+
+Application Change Used
+-----------------------
+
+A harmless validation comment was added under the HavenBridge API source tree.
+
+Validated file:
+
+    applications/havenbridge-api/app/main.py
+
+Validation marker:
+
+    # CI change-detection positive validation marker.
+
+
+Observed Result
+---------------
+
+The GitHub Actions workflow completed successfully.
+
+The screenshot of the successful workflow confirmed:
+
+    Checkout repository                         PASS
+
+    Detect HavenBridge API changes             PASS
+
+    Set up Python 3.12                          PASS
+
+    Install Python dependencies                 PASS
+
+    Run HavenBridge API tests                   PASS
+
+    Build HavenBridge API Docker image          PASS
+
+    Install Kubeconform                         PASS
+
+    Validate HavenBridge Kubernetes manifests   PASS
+
+    Log in to GitHub Container Registry         PASS
+
+    Tag HavenBridge API image for GHCR          PASS
+
+    Push HavenBridge API image to GHCR          PASS
+
+    Complete job                               PASS
+
+
+Positive Test Interpretation
+----------------------------
+
+A file under:
+
+    applications/havenbridge-api/
+
+changed.
+
+The change detector therefore produced:
+
+    changed=true
+
+Conceptually:
+
+    API source change
+        ↓
+    changed=true
+        ↓
+    CI validation
+        ↓
+    GHCR authentication
+        ↓
+    image tagged with Git SHA
+        ↓
+    image pushed to GHCR
+
+
+Positive Test Result
+--------------------
+
+Application change detected                  YES
+
+FastAPI tests passed                         YES
+
+Docker image built successfully              YES
+
+Kubernetes manifests validated               YES
+
+GHCR login executed                          YES
+
+GHCR image tag executed                      YES
+
+GHCR push executed                           YES
+
+Workflow completed successfully              YES
+
+Positive test                                PASS
+
+
+Combined Validation
+-------------------
+
+The two tests prove both branches of the conditional workflow logic.
+
+Negative path:
+
+    API changed=false
+        ↓
+    GHCR publication skipped
+        ↓
+    PASS
+
+
+Positive path:
+
+    API changed=true
+        ↓
+    GHCR publication executed
+        ↓
+    PASS
+
+
+Validated Conditional Logic
+---------------------------
+
+The publication steps use:
+
+    github.event_name == 'push'
+
+AND:
+
+    github.ref == 'refs/heads/main'
+
+AND:
+
+    steps.api_changes.outputs.changed == 'true'
+
+
+This can be read as:
+
+    Push event?
+        ↓ YES
+
+    Main branch?
+        ↓ YES
+
+    HavenBridge API changed?
+        ↓
+     YES / NO
+
+    YES
+        ↓
+    GHCR login
+    GHCR tag
+    GHCR push
+
+    NO
+        ↓
+    Skip all GHCR publication steps
+
+
+Operational Benefit
+-------------------
+
+The HavenBridge CI pipeline no longer publishes unnecessary API images for
+documentation-only or unrelated repository changes.
+
+At the same time, legitimate application changes still produce a validated,
+traceable GHCR image.
+
+
+CI and Publication Separation
+-----------------------------
+
+The validation also proves that:
+
+    CI validation
+
+and:
+
+    artifact publication
+
+are separate decisions.
+
+For non-API changes, HavenBridge still performs:
+
+    FastAPI tests
+    Docker build validation
+    Kubernetes manifest validation
+
+but does not publish another API image.
+
+
+Final Result
+------------
+
+Negative test:
+
+    PASS
+
+Positive test:
+
+    PASS
+
+Conditional GHCR publication:
+
+    VALIDATED
+
+
+Conclusion
+----------
+
+The HavenBridge GitHub Actions workflow now correctly distinguishes between
+general repository changes and HavenBridge API source changes.
+
+The validated behavior is:
+
+    Non-API change
+        ↓
+    CI runs
+        ↓
+    GHCR publication skipped
+
+
+    API change
+        ↓
+    CI runs
+        ↓
+    API change detected
+        ↓
+    GHCR login
+        ↓
+    Git SHA image tag
+        ↓
+    GHCR publication
+
+Both the negative and positive paths were successfully validated.
