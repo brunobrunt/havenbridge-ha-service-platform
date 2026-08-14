@@ -18,6 +18,8 @@ Validation evidence should remain in:
 
 1. What Is GitHub Actions?
 --------------------------
+GitHub Actions is a continuous integration and continuous delivery (CI/CD) platform that allows you to automate your build, test, and deployment pipeline
+
 GitHub Actions is GitHub's automation platform.
 
 It allows HavenBridge to automatically perform tasks when events happen in
@@ -128,6 +130,7 @@ the workflow to run.
 
 5. Job
 ------
+A job is a set of steps in a workflow that is executed on the same runner.
 A workflow contains one or more jobs.
 
 The first HavenBridge CI workflow currently has a job called:
@@ -1512,3 +1515,162 @@ Therefore HavenBridge continues to run:
 even when the API itself did not change.
 
 This keeps CI validation separate from artifact publication.
+
+Git Commit vs Git Tag
+---------------------
+
+A Git commit records a specific change or snapshot in the repository history.
+
+For example:
+
+git commit -m "ci: add semantic release workflow"
+
+creates a new commit containing the staged changes.
+
+A commit receives a unique Git SHA, for example:
+
+abc123...
+
+The Git SHA gives us an exact point in the repository history.
+
+A Git tag is different.
+
+A Git tag gives an existing Git object, usually a commit, a meaningful name.
+
+For HavenBridge releases, a tag such as:
+
+v0.2.0
+
+means:
+
+"This specific commit represents HavenBridge API version 0.2.0."
+
+The relationship is:
+
+Git commit
+    |
+    | unique SHA
+    v
+abc123...
+    |
+    | release tag points to this commit
+    v
+v0.2.0
+
+Creating a tag does not create another copy of the source code and does not
+create another commit. It creates a named reference to the selected commit.
+
+Normal development therefore looks like:
+
+edit files
+    |
+git add
+    |
+git commit
+    |
+git push origin main
+    |
+normal CI runs
+
+An intentional HavenBridge release will look like:
+
+tested commit on main
+    |
+create annotated Git tag
+    |
+v0.2.0
+    |
+push tag to GitHub
+    |
+release.yml starts
+    |
+tests and validates release
+    |
+publishes versioned image to GHCR
+
+Annotated Tags
+--------------
+
+For HavenBridge semantic releases, annotated tags are preferred.
+
+Example:
+
+git tag -a v0.2.0 -m "HavenBridge API v0.2.0"
+
+The options mean:
+
+-a
+    Create an annotated tag.
+
+-m
+    Add a descriptive message to the tag.
+
+An annotated tag contains release-oriented metadata such as the tagger,
+date, and tag message.
+
+The tag is pushed separately from the normal branch push:
+
+git push origin v0.2.0
+
+Important:
+
+git push origin main
+
+pushes commits on the main branch.
+
+git push origin v0.2.0
+
+pushes the release tag.
+
+A normal Git commit does not automatically mean that a new semantic version
+should be released.
+
+Many commits may occur between semantic releases.
+
+Example:
+
+commit A - documentation change
+commit B - test improvement
+commit C - bug fix
+commit D - feature complete
+    |
+    +-- tag v0.2.0
+
+This lets HavenBridge separate normal development history from intentional
+software releases.
+
+
+GitHub Actions Release Variables
+--------------------------------
+
+GitHub Actions automatically provides several environment variables to the
+runner.
+
+Two important variables used by the HavenBridge release workflow are:
+
+GITHUB_REF_NAME
+
+For a release triggered by the tag:
+
+v0.2.0
+
+GITHUB_REF_NAME contains:
+
+v0.2.0
+
+GITHUB_SHA
+
+Contains the exact Git commit SHA associated with the release.
+
+The HavenBridge release workflow uses both values so the same Docker image
+can receive:
+
+ghcr.io/brunobrunt/havenbridge-api:v0.2.0
+
+and:
+
+ghcr.io/brunobrunt/havenbridge-api:<Git-SHA>
+
+The semantic version is human-friendly.
+
+The Git SHA provides exact source-code traceability.

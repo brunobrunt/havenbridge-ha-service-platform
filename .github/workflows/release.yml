@@ -1,0 +1,100 @@
+name: HavenBridge Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+  packages: write
+
+
+jobs:
+  release:
+    name: Semantic Version Release
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: applications/havenbridge-api
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Show release tag
+        run: echo "HavenBridge release tag is ${GITHUB_REF_NAME}"
+
+      - name: Validate semantic version tag
+        run: |
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid release tag: ${GITHUB_REF_NAME}"
+            echo "Expected format: vMAJOR.MINOR.PATCH, for example v0.2.0"
+            exit 1
+          fi
+
+          echo "Valid semantic version tag: ${GITHUB_REF_NAME}"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --requirement requirements-dev.txt
+
+      - name: Run HavenBridge API tests
+        run: python -m pytest
+
+      - name: Build HavenBridge API Docker image
+        run: docker build --tag havenbridge-api:release .
+
+      - name: Install Kubeconform
+        run: |
+          KUBECONFORM_VERSION="0.8.0"
+          mkdir -p "$HOME/.local/bin"
+
+          curl --fail --location --silent --show-error \
+            "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
+            | tar -xz -C "$HOME/.local/bin" kubeconform
+
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+          "$HOME/.local/bin/kubeconform" -v
+
+      - name: Validate HavenBridge Kubernetes manifests
+        run: |
+          kubeconform \
+            -strict \
+            -summary \
+            -kubernetes-version 1.36.2 \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            "$GITHUB_WORKSPACE"/kubernetes/applications/havenbridge/backend/*.yaml
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag HavenBridge API release image
+        run: |
+          docker tag \
+            havenbridge-api:release \
+            ghcr.io/brunobrunt/havenbridge-api:${GITHUB_REF_NAME}
+
+          docker tag \
+            havenbridge-api:release \
+            ghcr.io/brunobrunt/havenbridge-api:${GITHUB_SHA}
+
+      - name: Push HavenBridge API release images
+        run: |
+          docker push \
+            ghcr.io/brunobrunt/havenbridge-api:${GITHUB_REF_NAME}
+
+          docker push \
+            ghcr.io/brunobrunt/havenbridge-api:${GITHUB_SHA}
