@@ -680,3 +680,36 @@ PART 5 — HAVENBRIDGE PRE-COMMIT MEMORY FLOW
     Confirm clean state
         ↓
     git status --short
+
+
+Git Tag Commands
+----------------
+
+git tag -a v0.2.0 -m "HavenBridge API v0.2.0"
+
+Creates an annotated Git tag named v0.2.0 and attaches the message
+"HavenBridge API v0.2.0".
+
+-a = create an annotated tag
+-m = add a descriptive tag message
+
+
+git tag --list
+
+Lists all Git tags that currently exist in the local repository.
+
+
+git show v0.2.0 --no-patch
+
+Shows information about the v0.2.0 tag and the commit it points to without
+displaying the file-by-file commit changes.
+
+--no-patch = do not display the commit diff
+
+
+git push origin v0.2.0
+
+Pushes the local v0.2.0 Git tag to the remote repository named origin.
+
+For HavenBridge, pushing this semantic-version tag triggers the HavenBridge
+Release GitHub Actions workflow.

@@ -1,0 +1,90 @@
+HavenBridge Semantic Version Release Validation Steps
+-----------------------------------------------------
+
+Purpose
+-------
+
+Validate that HavenBridge can create an intentional semantic version release
+using a Git tag, run the GitHub Actions release workflow, and publish the same
+Docker image to GHCR with both a semantic version tag and a Git SHA tag.
+
+
+1. Verify repository state
+--------------------------
+
+cd /home/alabi/projects/havenbridge-ha-service-platform
+
+git status --short
+git log -3 --oneline
+git tag --list
+
+
+2. Create annotated semantic version tag
+----------------------------------------
+
+git tag -a v0.2.0 -m "HavenBridge API v0.2.0"
+
+
+3. Inspect the local Git tag
+----------------------------
+
+git tag --list
+
+git show v0.2.0 --no-patch
+
+
+4. Push semantic version tag to GitHub
+--------------------------------------
+
+git push origin v0.2.0
+
+
+5. Verify remote annotated tag
+------------------------------
+
+git ls-remote --tags origin v0.2.0
+
+git ls-remote --tags origin 'v0.2.0^{}'
+
+
+6. Validate GitHub Actions release workflow
+-------------------------------------------
+
+Open GitHub Actions and confirm the HavenBridge Release workflow successfully
+completes the following steps:
+
+- Checkout repository
+- Show release tag
+- Validate semantic version tag
+- Set up Python 3.12
+- Install Python dependencies
+- Run HavenBridge API tests
+- Build HavenBridge API Docker image
+- Install Kubeconform
+- Validate HavenBridge Kubernetes manifests
+- Log in to GitHub Container Registry
+- Tag HavenBridge API release image
+- Push HavenBridge API release images
+
+
+7. Verify semantic-version image in GHCR
+----------------------------------------
+
+docker buildx imagetools inspect \
+  ghcr.io/brunobrunt/havenbridge-api:v0.2.0
+
+
+8. Verify Git-SHA image in GHCR
+-------------------------------
+
+docker buildx imagetools inspect \
+  ghcr.io/brunobrunt/havenbridge-api:38688197e8841c382aba881da32195334288b950
+
+
+9. Compare image digests
+------------------------
+
+Confirm that both GHCR tags return the same image digest.
+
+This proves that the release workflow builds the Docker image once and applies
+both the semantic version tag and Git SHA tag to the same image.

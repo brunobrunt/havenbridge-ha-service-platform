@@ -885,3 +885,39 @@ A concise explanation of the HavenBridge image versioning strategy is:
     version because it is mutable. The CI pipeline follows a build-once
     approach so the image that passes validation is the same artifact that is
     later tagged and published to GHCR."
+
+
+## Semantic Version Release Automation
+
+HavenBridge now has a separate GitHub Actions release workflow for intentional
+semantic-version releases.
+
+Workflow:
+
+```text
+.github/workflows/release.yml
+
+
+Annotated Git tag
+        ↓
+Validate vMAJOR.MINOR.PATCH
+        ↓
+Checkout tagged source
+        ↓
+Set up Python 3.12
+        ↓
+Install application dependencies
+        ↓
+Run FastAPI pytest suite
+        ↓
+Build Docker image once
+        ↓
+Validate Kubernetes manifests with Kubeconform
+        ↓
+Authenticate to GHCR
+        ↓
+Tag the same image with:
+    ├── Semantic version
+    └── Git commit SHA
+        ↓
+Push both tags to GHCR

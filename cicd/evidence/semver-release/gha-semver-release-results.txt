@@ -1,0 +1,139 @@
+HavenBridge Semantic Version Release Validation Results
+-------------------------------------------------------
+
+Release Version
+---------------
+
+v0.2.0
+
+
+Release Commit
+--------------
+
+38688197e8841c382aba881da32195334288b950
+
+
+Git Tag Validation
+------------------
+
+The annotated Git tag v0.2.0 was created successfully.
+
+git show v0.2.0 --no-patch confirmed that the tag points to:
+
+38688197e8841c382aba881da32195334288b950
+
+Commit message:
+
+ci: add semantic release workflow
+
+
+Remote Tag Validation
+---------------------
+
+Command:
+
+git ls-remote --tags origin 'v0.2.0^{}'
+
+Result:
+
+38688197e8841c382aba881da32195334288b950    refs/tags/v0.2.0^{}
+
+Result:
+
+PASS
+
+The remote annotated tag resolves to the intended Git commit.
+
+
+GitHub Actions Release Validation
+---------------------------------
+
+Workflow:
+
+HavenBridge Release
+
+Job:
+
+Semantic Version Release
+
+Result:
+
+PASS
+
+The release workflow successfully completed:
+
+- semantic version validation
+- FastAPI tests
+- Docker image build
+- Kubernetes manifest validation
+- GHCR authentication
+- semantic version image tagging
+- Git SHA image tagging
+- GHCR publication
+
+
+GHCR Semantic Version Validation
+--------------------------------
+
+Image:
+
+ghcr.io/brunobrunt/havenbridge-api:v0.2.0
+
+Digest:
+
+sha256:3673cfa5c0cf771dfd3d11fe8a6d31d6f489d2c47eae5a9cc7abde4134211176
+
+Result:
+
+PASS
+
+
+GHCR Git SHA Validation
+-----------------------
+
+Image:
+
+ghcr.io/brunobrunt/havenbridge-api:38688197e8841c382aba881da32195334288b950
+
+Digest:
+
+sha256:3673cfa5c0cf771dfd3d11fe8a6d31d6f489d2c47eae5a9cc7abde4134211176
+
+Result:
+
+PASS
+
+
+Build-Once Validation
+---------------------
+
+Semantic version digest:
+
+sha256:3673cfa5c0cf771dfd3d11fe8a6d31d6f489d2c47eae5a9cc7abde4134211176
+
+Git SHA digest:
+
+sha256:3673cfa5c0cf771dfd3d11fe8a6d31d6f489d2c47eae5a9cc7abde4134211176
+
+The digests are identical.
+
+Result:
+
+PASS
+
+This proves that HavenBridge built one Docker image and attached two release
+identifiers to the same artifact:
+
+v0.2.0
+    Human-readable semantic release version.
+
+38688197e8841c382aba881da32195334288b950
+    Exact source-code traceability.
+
+
+Overall Result
+--------------
+
+PASS
+
+HavenBridge semantic version release automation is successfully validated.
