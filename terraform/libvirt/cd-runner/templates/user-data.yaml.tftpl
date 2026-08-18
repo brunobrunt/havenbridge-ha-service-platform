@@ -1,0 +1,55 @@
+#cloud-config
+
+preserve_hostname: false
+hostname: ${hostname}
+fqdn: ${hostname}.${domain_name}
+manage_etc_hosts: true
+
+users:
+  - name: ${ssh_user}
+    groups:
+      - adm
+      - sudo
+    shell: /bin/bash
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    lock_passwd: true
+    ssh_authorized_keys:
+      - ${ssh_public_key}
+
+ssh_pwauth: false
+disable_root: true
+
+timezone: ${timezone}
+
+package_update: true
+package_upgrade: false
+
+packages:
+  - qemu-guest-agent
+  - curl
+  - vim
+  - jq
+  - wget
+  - ca-certificates
+
+growpart:
+  mode: auto
+  devices:
+    - /
+
+resize_rootfs: true
+
+write_files:
+  - path: /etc/havenbridge-runner-info
+    owner: root:root
+    permissions: "0644"
+    content: |
+      RUNNER_NAME=${hostname}
+      RUNNER_PURPOSE=HavenBridge_CD
+      PROVISIONED_BY=Terraform_and_cloud-init
+
+runcmd:
+  - systemctl enable --now qemu-guest-agent
+  - touch /var/lib/havenbridge-cloud-init-complete
+
+final_message: "Cloud-init completed for ${hostname} after $UPTIME seconds."

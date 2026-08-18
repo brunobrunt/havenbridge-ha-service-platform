@@ -1,0 +1,12 @@
+---
+# Configure the HavenBridge self-hosted CD runner.
+#
+# This playbook targets only the cd_runners inventory group
+# and applies the cd_runner role.
+
+- name: Configure HavenBridge CD runner
+  hosts: cd_runners
+  become: true
+
+  roles:
+    - cd_runner

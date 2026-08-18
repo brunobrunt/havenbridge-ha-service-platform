@@ -1,0 +1,154 @@
+HavenBridge Self-Hosted CD Runner
+Kubernetes RBAC and Credential Validation
+Date: 2026-08-17
+
+PURPOSE
+
+Validate that the HavenBridge self-hosted GitHub Actions CD runner can
+authenticate to the Kubernetes cluster using a dedicated, restricted
+ServiceAccount without receiving cluster-admin privileges.
+
+RUNNER
+
+Hostname:
+havenbridge-runner01
+
+IP address:
+172.16.10.37
+
+Linux service account:
+github-runner
+
+Kubernetes kubeconfig:
+/home/github-runner/.kube/config
+
+KUBERNETES IDENTITY
+
+Namespace:
+havenbridge
+
+ServiceAccount:
+havenbridge-deployer
+
+Authentication identity:
+system:serviceaccount:havenbridge:havenbridge-deployer
+
+The ServiceAccount is connected to a namespace-scoped Role through a
+RoleBinding. The Role grants only the Kubernetes permissions required
+for the CD deployment process.
+
+The runner does not use the kubernetes-admin credentials.
+
+KUBECONFIG VALIDATION
+
+The restricted kubeconfig was installed at:
+
+/home/github-runner/.kube/config
+
+File ownership:
+
+github-runner:github-runner
+
+File permissions:
+
+600
+
+POSITIVE AUTHORIZATION TEST
+
+Command executed on havenbridge-runner01:
+
+sudo -u github-runner \
+  KUBECONFIG=/home/github-runner/.kube/config \
+  kubectl get deployment havenbridge-api \
+  -n havenbridge
+
+Result:
+
+NAME              READY   UP-TO-DATE   AVAILABLE   AGE
+havenbridge-api   2/2     2            2           16d
+
+RESULT:
+PASS
+
+The github-runner account successfully authenticated to Kubernetes
+as the havenbridge-deployer ServiceAccount and was authorized to read
+the HavenBridge application Deployment.
+
+NEGATIVE AUTHORIZATION TEST
+
+Command executed on havenbridge-runner01:
+
+sudo -u github-runner \
+  KUBECONFIG=/home/github-runner/.kube/config \
+  kubectl get secrets \
+  -n havenbridge
+
+Result:
+
+Error from server (Forbidden): secrets is forbidden:
+User "system:serviceaccount:havenbridge:havenbridge-deployer"
+cannot list resource "secrets" in API group "" in the namespace
+"havenbridge"
+
+RESULT:
+PASS
+
+The request was intentionally denied.
+
+This confirms that the CD identity does not have permission to list
+Kubernetes Secrets in the havenbridge namespace.
+
+LEAST-PRIVILEGE VALIDATION
+
+The tests prove that:
+
+1. The self-hosted GitHub Actions runner can reach the Kubernetes API.
+
+2. The github-runner Linux account can use the restricted kubeconfig.
+
+3. The kubeconfig authenticates as:
+
+   system:serviceaccount:havenbridge:havenbridge-deployer
+
+4. The deployer can access the HavenBridge Deployment.
+
+5. The deployer cannot list Kubernetes Secrets.
+
+6. Cluster-admin credentials are not required by the CD runner.
+
+ACCESS FLOW
+
+GitHub Actions
+      |
+      v
+havenbridge-runner01
+      |
+      v
+github-runner Linux user
+      |
+      v
+/home/github-runner/.kube/config
+      |
+      v
+havenbridge-deployer ServiceAccount
+      |
+      v
+RoleBinding
+      |
+      v
+Namespace-scoped Role
+      |
+      +---- Deployment operations: ALLOWED
+      |
+      +---- Secret access: DENIED
+
+SECURITY SUMMARY
+
+I created a dedicated Kubernetes ServiceAccount for CD. A
+namespace-scoped Role grants only the deployment permissions it needs,
+and a RoleBinding connects the identity to those permissions. I then
+tested both positive and negative authorization cases to prove least
+privilege.
+
+No ServiceAccount token values or kubeconfig credentials are stored in
+this evidence file.

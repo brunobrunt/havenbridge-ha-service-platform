@@ -1,0 +1,47 @@
+#serviceaccount.yaml
+#        ↓
+#WHO?
+#havenbridge-deployer
+#
+#role.yaml
+#        ↓
+#WHAT CAN IT DO?
+#get/list/watch Deployments
+#patch only havenbridge-api
+#
+#rolebinding.yaml
+#        ↓
+#CONNECTS THE WHO TO THE PERMISSIONS
+#
+
+
+
+
+
+
+
+
+
+
+
+
+# Connects the HavenBridge CD ServiceAccount to its restricted Role.
+#
+# This grants havenbridge-deployer the permissions defined
+# in the havenbridge-deployer Role inside the havenbridge namespace.
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: havenbridge-deployer
+  namespace: havenbridge
+
+subjects:
+  - kind: ServiceAccount
+    name: havenbridge-deployer
+    namespace: havenbridge
+
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: havenbridge-deployer

@@ -1,0 +1,74 @@
+---
+# This role prepares havenbridge-runner01 to act as the
+# self-hosted GitHub Actions CD runner for HavenBridge.
+#
+# The runner receives approved deployment jobs from GitHub
+# and uses restricted Kubernetes access to deploy HavenBridge
+# releases into the private Kubernetes cluster.
+#
+# This role prepares the operating system, creates the dedicated
+# github-runner Linux account, and installs kubectl.
+#
+# Kubernetes authentication is provided separately through the
+# restricted havenbridge-deployer ServiceAccount kubeconfig.
+
+- name: Install CD runner baseline packages
+  ansible.builtin.apt:
+    name:
+      - git
+      - curl
+      - wget
+      - jq
+      - ca-certificates
+      - unzip
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create dedicated GitHub Actions runner user
+  ansible.builtin.user:
+    name: github-runner
+    comment: "HavenBridge GitHub Actions Runner"
+    shell: /bin/bash
+    create_home: true
+    state: present
+
+- name: Create Kubernetes APT keyring directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Download Kubernetes repository signing key
+  ansible.builtin.get_url:
+    url: https://pkgs.k8s.io/core:/stable:/v1.36/deb/Release.key
+    dest: /tmp/kubernetes-release.key
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Convert Kubernetes signing key to GPG format
+  ansible.builtin.command:
+    argv:
+      - gpg
+      - --batch
+      - --yes
+      - --dearmor
+      - --output
+      - /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      - /tmp/kubernetes-release.key
+    creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+- name: Configure Kubernetes v1.36 APT repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.36/deb/ /"
+    filename: kubernetes
+    state: present
+
+- name: Install kubectl
+  ansible.builtin.apt:
+    name: kubectl
+    state: present
+    update_cache: true

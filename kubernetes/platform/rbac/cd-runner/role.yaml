@@ -1,0 +1,36 @@
+# Defines the limited Kubernetes permissions required by HavenBridge CD.
+#
+# The deployer can:
+# - read and watch Deployments in the havenbridge namespace
+# - patch only the havenbridge-api Deployment
+#
+# It cannot:
+# - read Secrets
+# - modify RBAC
+# - manage nodes
+# - modify other namespaces
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: havenbridge-deployer
+  namespace: havenbridge
+
+rules:
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+    verbs:
+      - get
+      - list
+      - watch
+
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+    resourceNames:
+      - havenbridge-api
+    verbs:
+      - patch
