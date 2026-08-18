@@ -1,0 +1,107 @@
+name: HavenBridge CD
+
+on:
+  workflow_run:
+    workflows:
+      - HavenBridge Release
+    types:
+      - completed
+
+# This workflow does not require access to the repository through
+# GITHUB_TOKEN. Kubernetes authentication is provided locally by the
+# restricted kubeconfig installed on the self-hosted runner.
+permissions: {}
+
+concurrency:
+  group: havenbridge-production-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy HavenBridge API
+
+    # Deploy only when the HavenBridge Release workflow succeeded.
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    runs-on:
+      - self-hosted
+      - havenbridge-cd
+
+    timeout-minutes: 10
+
+    env:
+      KUBECONFIG: /home/github-runner/.kube/config
+      NAMESPACE: havenbridge
+      DEPLOYMENT: havenbridge-api
+      CONTAINER: havenbridge-api
+      RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+
+    steps:
+      - name: Show CD runner identity
+        run: |
+          echo "Runner hostname: $(hostname)"
+          echo "Runner user: $(whoami)"
+          echo "Release SHA: ${RELEASE_SHA}"
+
+      - name: Validate release SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! "${RELEASE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Invalid release SHA: ${RELEASE_SHA}"
+            exit 1
+          fi
+
+      - name: Verify Kubernetes access
+        run: |
+          kubectl get deployment "${DEPLOYMENT}" \
+            -n "${NAMESPACE}"
+
+      - name: Show currently deployed image
+        run: |
+          kubectl get deployment "${DEPLOYMENT}" \
+            -n "${NAMESPACE}" \
+            -o jsonpath='{.spec.template.spec.containers[?(@.name=="havenbridge-api")].image}{"\n"}'
+
+      - name: Deploy released HavenBridge API image
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          IMAGE="ghcr.io/brunobrunt/havenbridge-api:${RELEASE_SHA}"
+
+          echo "Deploying ${IMAGE}"
+
+          kubectl set image \
+            deployment/"${DEPLOYMENT}" \
+            "${CONTAINER}"="${IMAGE}" \
+            -n "${NAMESPACE}"
+
+      - name: Wait for HavenBridge API rollout
+        run: |
+          kubectl rollout status \
+            deployment/"${DEPLOYMENT}" \
+            -n "${NAMESPACE}" \
+            --timeout=180s
+
+      - name: Verify deployed image
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          EXPECTED="ghcr.io/brunobrunt/havenbridge-api:${RELEASE_SHA}"
+
+          ACTUAL="$(kubectl get deployment "${DEPLOYMENT}" \
+            -n "${NAMESPACE}" \
+            -o jsonpath='{.spec.template.spec.containers[?(@.name=="havenbridge-api")].image}')"
+
+          echo "Expected image: ${EXPECTED}"
+          echo "Actual image:   ${ACTUAL}"
+
+          if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
+            echo "Deployment image verification failed."
+            exit 1
+          fi
+
+          echo "HavenBridge deployment verification passed."
