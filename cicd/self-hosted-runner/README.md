@@ -396,20 +396,132 @@ cicd/self-hosted-runner/evidence/kubernetes-rbac-validation.txt
 No Kubernetes token values or private credentials are stored in the
 documentation.
 
+## GitHub Actions Runner Registration
+
+After the virtual machine, operating-system configuration, Kubernetes
+access and RBAC validation were completed, `havenbridge-runner01` was
+registered with the HavenBridge GitHub repository as a self-hosted
+GitHub Actions runner.
+
+The runner was registered with:
+
+```text
+Runner name:  havenbridge-runner01
+Runner label: havenbridge-cd
+Runner group: Default
+Work folder:  _work
+```
+
+The custom `havenbridge-cd` label allows HavenBridge deployment
+workflows to target this runner specifically.
+
+A future GitHub Actions deployment job can therefore use:
+
+```yaml
+runs-on: [self-hosted, havenbridge-cd]
+```
+
+This prevents the HavenBridge CD job from being sent to unrelated
+self-hosted runners.
+
+## GitHub Actions Runner Service
+
+The GitHub Actions runner application is installed under:
+
+```text
+/home/github-runner/actions-runner
+```
+
+The runner is operated by the dedicated Linux account:
+
+```text
+github-runner
+```
+
+The administrative `mino` account does not have direct access to the
+`github-runner` home directory without privilege elevation.
+
+This preserves separation between the VM administrator and the identity
+that executes GitHub Actions jobs.
+
+The GitHub Actions runner was installed as a systemd service:
+
+```text
+actions.runner.brunobrunt-havenbridge-ha-service-platform.havenbridge-runner01.service
+```
+
+The service was configured to run as:
+
+```text
+github-runner
+```
+
+and is enabled to start automatically when `havenbridge-runner01`
+boots.
+
+Service validation showed:
+
+```text
+Loaded: loaded
+Enabled: enabled
+Active: active (running)
+```
+
+The runner successfully connected to GitHub and reported:
+
+```text
+Connected to GitHub
+Current runner version: 2.336.0
+Listening for Jobs
+```
+
+The running process was also verified to be owned by the
+`github-runner` Linux account.
+
+The final service execution path is:
+
+```text
+GitHub Actions
+        ↓
+havenbridge-runner01
+        ↓
+systemd
+        ↓
+GitHub Actions Runner service
+        ↓
+github-runner Linux account
+        ↓
+_work/
+        ↓
+kubectl
+        ↓
+/home/github-runner/.kube/config
+        ↓
+havenbridge-deployer ServiceAccount
+        ↓
+Namespace-scoped Kubernetes RBAC
+```
+
+This means the self-hosted runner is now online, persistent across VM
+reboots, connected to GitHub and ready to receive HavenBridge CD jobs.
+
+
+
 ## Current Status
 
 The following self-hosted CD runner milestones are complete:
 
-- Dedicated runner VM provisioned.
-- Network connectivity validated.
-- SSH and Ansible management validated.
-- Kubernetes API connectivity validated.
-- Dedicated `havenbridge-deployer` ServiceAccount created.
-- Namespace-scoped RBAC configured.
-- Restricted kubeconfig installed for `github-runner`.
-- Positive deployment authorization test passed.
-- Negative Secret authorization test passed.
-- Least-privilege Kubernetes access validated.
+* GitHub Actions runner software installed.
+* Runner registered with the HavenBridge GitHub repository.
+* Runner registered as `havenbridge-runner01`.
+* Custom `havenbridge-cd` runner label configured.
+* GitHub Actions runner installed as a systemd service.
+* Runner service enabled for automatic startup.
+* Runner service validated as `active (running)`.
+* Runner process validated as running under `github-runner`.
+* GitHub connectivity validated.
+* Runner confirmed as listening for GitHub Actions jobs.
 
 The next phase is to connect the self-hosted runner to the HavenBridge
 GitHub Actions continuous deployment workflow.
+
