@@ -57,6 +57,7 @@
       - "{{ control_plane_endpoint_name }}"
   register: api_name_resolution
   changed_when: false
+  when: not ansible_check_mode
 
 - name: Check kube-vip network interface
   ansible.builtin.command:
@@ -67,6 +68,7 @@
       - "{{ kube_vip_interface }}"
   register: kube_vip_interface_status
   changed_when: false
+  when: not ansible_check_mode
 
 - name: Validate Kubernetes API endpoint preparation
   ansible.builtin.assert:
@@ -84,3 +86,4 @@
       {{ control_plane_endpoint_name }} resolves to
       {{ control_plane_vip }}, and interface
       {{ kube_vip_interface }} exists.
+  when: not ansible_check_mode

@@ -302,6 +302,8 @@ The backend application Services remain internal Kubernetes `ClusterIP` Services
          172.16.10.34              172.16.10.35
 ```
 
+The basic idea was: the Kubernetes API needed one stable address that would not depend on any single control-plane VM.
+
 The five virtual machines run on a Dell Precision 5810 host using KVM and libvirt.
 
 The three control-plane nodes provide a stacked-etcd quorum. kube-vip exposes the shared Kubernetes API endpoint at `172.16.10.30`, while application workloads are scheduled primarily on the two worker nodes.
