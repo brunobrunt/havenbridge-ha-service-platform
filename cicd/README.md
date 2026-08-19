@@ -921,3 +921,791 @@ Tag the same image with:
     └── Git commit SHA
         ↓
 Push both tags to GHCR
+
+````
+
+For the first self-hosted CD validation, HavenBridge used the semantic
+version:
+
+```text
+v0.3.0
+````
+
+The annotated tag referenced the commit:
+
+```text
+e3bacb4f602b2adfb97356f2b75be8731c23d8c7
+```
+
+The Release workflow published both:
+
+```text
+ghcr.io/brunobrunt/havenbridge-api:v0.3.0
+```
+
+and:
+
+```text
+ghcr.io/brunobrunt/havenbridge-api:e3bacb4f602b2adfb97356f2b75be8731c23d8c7
+```
+
+The semantic-version tag provides a human-readable release identifier,
+while the commit-SHA tag provides exact source-code traceability.
+
+The current release model intentionally uses a manual semantic-version
+gate. A successful CI run does not automatically create a new release.
+An approved commit is explicitly tagged and the tag is pushed to GitHub.
+
+Example:
+
+```bash
+git tag -a v0.3.0 \
+  -m "HavenBridge v0.3.0 - self-hosted continuous deployment"
+
+git push origin v0.3.0
+```
+
+Automated semantic-version selection and automatic Git tag creation are
+planned as a later improvement after the manual release process has been
+fully understood and documented.
+
+## Continuous Deployment Implementation
+
+HavenBridge now has a working continuous deployment workflow that
+deploys approved application releases from GitHub Container Registry
+into the private Kubernetes cluster.
+
+Workflow:
+
+```text
+.github/workflows/cd.yml
+```
+
+Unlike CI and Release, CD does not execute on a GitHub-hosted runner.
+
+It targets the dedicated self-hosted runner:
+
+```text
+havenbridge-runner01
+```
+
+using:
+
+```yaml
+runs-on:
+  - self-hosted
+  - havenbridge-cd
+```
+
+This is required because the Kubernetes API exists inside the private
+HavenBridge homelab network.
+
+## Release-to-CD Trigger
+
+The CD workflow is not triggered directly by every push to `main`.
+
+Instead, it waits for the `HavenBridge Release` workflow to finish:
+
+```yaml
+on:
+  workflow_run:
+    workflows:
+      - HavenBridge Release
+    types:
+      - completed
+```
+
+The deployment job runs only when the Release workflow succeeded:
+
+```yaml
+if: ${{ github.event.workflow_run.conclusion == 'success' }}
+```
+
+The resulting flow is:
+
+```text
+Application changes
+        ↓
+Push to main
+        ↓
+HavenBridge CI
+        ↓
+Tests + build + manifest validation
+        ↓
+Manual release decision
+        ↓
+Semantic Git tag
+        ↓
+HavenBridge Release
+        ↓
+Release image published to GHCR
+        ↓
+Release workflow succeeds
+        ↓
+HavenBridge CD
+        ↓
+Self-hosted runner
+        ↓
+Kubernetes deployment
+```
+
+This prevents a failed release from reaching the Kubernetes environment.
+
+## CD Runner Identity
+
+The deployment job executes on:
+
+```text
+havenbridge-runner01
+IP: 172.16.10.37
+```
+
+The GitHub Actions service runs under the dedicated Linux account:
+
+```text
+github-runner
+```
+
+The runner is registered with GitHub using the custom label:
+
+```text
+havenbridge-cd
+```
+
+and runs persistently as the systemd service:
+
+```text
+actions.runner.brunobrunt-havenbridge-ha-service-platform.havenbridge-runner01.service
+```
+
+The service was validated as:
+
+```text
+enabled
+active
+```
+
+and successfully reported:
+
+```text
+Connected to GitHub
+Listening for Jobs
+```
+
+Detailed runner implementation is documented at:
+
+```text
+cicd/self-hosted-runner/README.md
+```
+
+## Restricted Kubernetes Authentication
+
+The GitHub Actions runner does not use Kubernetes administrator
+credentials.
+
+The runner uses the restricted kubeconfig:
+
+```text
+/home/github-runner/.kube/config
+```
+
+The kubeconfig is owned by:
+
+```text
+github-runner:github-runner
+```
+
+with permissions:
+
+```text
+600
+```
+
+It authenticates to Kubernetes as:
+
+```text
+system:serviceaccount:havenbridge:havenbridge-deployer
+```
+
+The Kubernetes identity is implemented using:
+
+```text
+ServiceAccount
+        ↓
+Role
+        ↓
+RoleBinding
+```
+
+under:
+
+```text
+kubernetes/platform/rbac/cd-runner/
+```
+
+The restricted Role allows the deployment identity to:
+
+* get Deployments;
+* list Deployments;
+* watch Deployments;
+* patch the `havenbridge-api` Deployment.
+
+The identity cannot read Kubernetes Secrets.
+
+## Least-Privilege Validation
+
+The positive authorization test was executed from
+`havenbridge-runner01` as the actual GitHub Actions Linux account:
+
+```bash
+sudo -u github-runner \
+  KUBECONFIG=/home/github-runner/.kube/config \
+  kubectl get deployment havenbridge-api \
+  -n havenbridge
+```
+
+Result:
+
+```text
+NAME              READY   UP-TO-DATE   AVAILABLE
+havenbridge-api   2/2     2            2
+```
+
+The Deployment request was allowed.
+
+A negative authorization test was then performed:
+
+```bash
+sudo -u github-runner \
+  KUBECONFIG=/home/github-runner/.kube/config \
+  kubectl get secrets \
+  -n havenbridge
+```
+
+Result:
+
+```text
+Error from server (Forbidden)
+```
+
+The request was intentionally denied.
+
+I created a dedicated Kubernetes ServiceAccount for CD. A
+namespace-scoped Role grants only the deployment permissions it needs,
+and a RoleBinding connects the identity to those permissions. I then
+tested both positive and negative authorization cases to prove least
+privilege.
+
+Detailed RBAC validation evidence is stored at:
+
+```text
+cicd/self-hosted-runner/evidence/kubernetes-rbac-validation.txt
+```
+
+## Why CD Deploys the Commit-SHA Image
+
+The Release workflow publishes both a semantic-version image and an
+immutable commit-SHA image.
+
+For `v0.3.0`:
+
+```text
+Human-readable release:
+
+ghcr.io/brunobrunt/havenbridge-api:v0.3.0
+```
+
+and:
+
+```text
+Exact source commit:
+
+ghcr.io/brunobrunt/havenbridge-api:e3bacb4f602b2adfb97356f2b75be8731c23d8c7
+```
+
+Both images represent the same release source state.
+
+The CD workflow deploys the commit-SHA-tagged image because the SHA
+provides an exact connection between:
+
+```text
+Git commit
+    ↓
+container image
+    ↓
+Kubernetes Deployment
+```
+
+The semantic version remains the human-readable release identifier.
+
+A future enhancement may deploy by immutable container image digest for
+even stronger artifact-level immutability.
+
+## CD Workflow Environment
+
+The CD workflow defines the deployment target using:
+
+```text
+KUBECONFIG=/home/github-runner/.kube/config
+NAMESPACE=havenbridge
+DEPLOYMENT=havenbridge-api
+CONTAINER=havenbridge-api
+RELEASE_SHA=<release commit SHA>
+```
+
+The release SHA is obtained from the completed Release workflow using:
+
+```yaml
+RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+```
+
+This ensures CD deploys the exact commit that produced the successful
+release.
+
+## CD Workflow Step-by-Step
+
+### Step 1 — Show Runner Identity
+
+The workflow displays:
+
+```text
+Runner hostname
+Runner operating-system user
+Release commit SHA
+```
+
+This confirms that the deployment job is executing on the expected
+self-hosted runner.
+
+### Step 2 — Validate the Release SHA
+
+The workflow verifies that `RELEASE_SHA` is a valid 40-character
+hexadecimal Git SHA.
+
+Invalid values cause the deployment to stop.
+
+### Step 3 — Verify Kubernetes Access
+
+The runner executes:
+
+```bash
+kubectl get deployment havenbridge-api \
+  -n havenbridge
+```
+
+This proves that the runner can:
+
+* reach the Kubernetes API;
+* authenticate with the restricted kubeconfig;
+* access the HavenBridge Deployment.
+
+### Step 4 — Show the Currently Deployed Image
+
+Before changing Kubernetes, the workflow reads the current container
+image from the Deployment.
+
+Before the first automated CD rollout, HavenBridge used:
+
+```text
+ghcr.io/brunobrunt/havenbridge-api:0.1.0
+```
+
+This provides a clear before-and-after deployment record.
+
+### Step 5 — Construct the Release Image
+
+The workflow constructs:
+
+```text
+ghcr.io/brunobrunt/havenbridge-api:${RELEASE_SHA}
+```
+
+For `v0.3.0`, this became:
+
+```text
+ghcr.io/brunobrunt/havenbridge-api:e3bacb4f602b2adfb97356f2b75be8731c23d8c7
+```
+
+### Step 6 — Update the Kubernetes Deployment
+
+The equivalent deployment command is:
+
+```bash
+kubectl set image \
+  deployment/havenbridge-api \
+  havenbridge-api=ghcr.io/brunobrunt/havenbridge-api:<RELEASE_SHA> \
+  -n havenbridge
+```
+
+Updating the Deployment Pod template causes Kubernetes to create a new
+rollout.
+
+### Step 7 — Wait for the Rollout
+
+The workflow waits for Kubernetes using:
+
+```bash
+kubectl rollout status \
+  deployment/havenbridge-api \
+  -n havenbridge \
+  --timeout=180s
+```
+
+CD therefore does not report success merely because the Deployment was
+patched.
+
+The new workload must successfully roll out.
+
+### Step 8 — Verify the Deployed Image
+
+After rollout, the workflow reads the Deployment image again and
+compares it with the expected release SHA image.
+
+If the expected and actual values differ, the CD workflow fails.
+
+## CD Security Decisions
+
+The CD workflow intentionally uses:
+
+```yaml
+permissions: {}
+```
+
+because it does not require broad `GITHUB_TOKEN` permissions.
+
+Kubernetes authentication is provided locally on the self-hosted runner
+through the restricted kubeconfig.
+
+The workflow also intentionally does not check out the repository source
+code.
+
+The deployment job needs only:
+
+* the release SHA;
+* `kubectl`;
+* the restricted kubeconfig;
+* network access to the Kubernetes API.
+
+This reduces the amount of code executed on the trusted deployment
+runner.
+
+## Deployment Concurrency
+
+The workflow uses:
+
+```text
+havenbridge-production-deployment
+```
+
+as its concurrency group.
+
+It also uses:
+
+```yaml
+cancel-in-progress: false
+```
+
+This prevents multiple HavenBridge deployments from modifying the same
+Deployment simultaneously.
+
+## First Successful End-to-End CD Deployment
+
+The first successful self-hosted HavenBridge CD deployment used:
+
+```text
+Release: v0.3.0
+
+Commit:
+e3bacb4f602b2adfb97356f2b75be8731c23d8c7
+```
+
+The Release workflow completed successfully and published both the
+semantic-version image and commit-SHA image to GHCR.
+
+The following CD steps passed:
+
+```text
+Show CD runner identity        PASS
+Validate release SHA           PASS
+Verify Kubernetes access       PASS
+Show currently deployed image  PASS
+Deploy released API image      PASS
+Wait for rollout               PASS
+Verify deployed image          PASS
+```
+
+## Cluster-Side Image Validation
+
+After GitHub Actions completed, the deployment was independently checked
+from `havenbridge-runner01`:
+
+```bash
+sudo -u github-runner \
+  KUBECONFIG=/home/github-runner/.kube/config \
+  kubectl get deployment havenbridge-api \
+  -n havenbridge \
+  -o jsonpath='{.spec.template.spec.containers[?(@.name=="havenbridge-api")].image}{"\n"}'
+```
+
+Result:
+
+```text
+ghcr.io/brunobrunt/havenbridge-api:e3bacb4f602b2adfb97356f2b75be8731c23d8c7
+```
+
+This confirmed that Kubernetes was configured with the exact image
+produced from the `v0.3.0` release commit.
+
+## Kubernetes Rollout Validation
+
+The rollout was independently verified using:
+
+```bash
+sudo -u github-runner \
+  KUBECONFIG=/home/github-runner/.kube/config \
+  kubectl rollout status deployment/havenbridge-api \
+  -n havenbridge
+```
+
+Result:
+
+```text
+deployment "havenbridge-api" successfully rolled out
+```
+
+The first Release → GHCR → self-hosted CD runner → Kubernetes deployment
+therefore completed successfully end to end.
+
+## CD Deployment Evidence
+
+Detailed evidence for the first successful deployment is stored at:
+
+```text
+cicd/evidence/cd-deployment/v0.3.0-deployment-validation.txt
+```
+
+## CD Troubleshooting
+
+### CD Workflow Does Not Start
+
+Confirm that `HavenBridge Release` completed successfully.
+
+The CD workflow is triggered by Release completion and not directly by a
+normal push to `main`.
+
+### Self-Hosted Runner Is Offline
+
+On `havenbridge-runner01`:
+
+```bash
+sudo systemctl status \
+  actions.runner.brunobrunt-havenbridge-ha-service-platform.havenbridge-runner01.service
+```
+
+Confirm automatic startup:
+
+```bash
+sudo systemctl is-enabled \
+  actions.runner.brunobrunt-havenbridge-ha-service-platform.havenbridge-runner01.service
+```
+
+Confirm that it is currently running:
+
+```bash
+sudo systemctl is-active \
+  actions.runner.brunobrunt-havenbridge-ha-service-platform.havenbridge-runner01.service
+```
+
+### Kubernetes Access Fails
+
+Test using the exact identity used by GitHub Actions:
+
+```bash
+sudo -u github-runner \
+  KUBECONFIG=/home/github-runner/.kube/config \
+  kubectl get deployment havenbridge-api \
+  -n havenbridge
+```
+
+### Kubernetes Returns Forbidden
+
+Do not solve a `Forbidden` error by giving the runner cluster-admin
+privileges.
+
+Review:
+
+```text
+kubernetes/platform/rbac/cd-runner/role.yaml
+```
+
+and add only the minimum permission genuinely required by CD.
+
+### Rollout Fails or Times Out
+
+Check the Deployment:
+
+```bash
+kubectl get deployment havenbridge-api \
+  -n havenbridge
+```
+
+Check the Pods:
+
+```bash
+kubectl get pods \
+  -n havenbridge
+```
+
+Describe the Deployment:
+
+```bash
+kubectl describe deployment havenbridge-api \
+  -n havenbridge
+```
+
+Review recent Kubernetes events:
+
+```bash
+kubectl get events \
+  -n havenbridge \
+  --sort-by='.lastTimestamp'
+```
+
+## Current Release and Deployment Model
+
+The current model is:
+
+```text
+Develop
+    ↓
+Commit
+    ↓
+Push
+    ↓
+CI
+    ↓
+Human approves a release
+    ↓
+Human selects semantic version
+    ↓
+Annotated Git tag
+    ↓
+Push tag
+    ↓
+Release workflow
+    ↓
+GHCR
+    ↓
+CD workflow
+    ↓
+Self-hosted runner
+    ↓
+Kubernetes
+```
+
+The manual semantic-version Git tag is currently an intentional release
+approval gate.
+
+## Future Automated Semantic Versioning
+
+A later HavenBridge improvement will automate semantic-version selection
+and release creation.
+
+Structured commit conventions may eventually determine whether a change
+represents:
+
+```text
+PATCH
+MINOR
+MAJOR
+```
+
+The planned evolution is:
+
+```text
+Current:
+
+Human selects release version
+        ↓
+Human creates Git tag
+        ↓
+Release + deployment automated
+
+
+Future:
+
+Structured commits
+        ↓
+Release automation
+        ↓
+Version calculated automatically
+        ↓
+Git tag created automatically
+        ↓
+Release created automatically
+        ↓
+Existing CD pipeline deploys release
+```
+
+The manual process is being retained first so that the mechanics of Git
+tags, releases, GHCR images and deployment triggers are fully understood
+before release-version creation is automated.
+
+## Related CI/CD Documentation
+
+GitHub-hosted runners:
+
+```text
+cicd/github-hosted-runners/README.md
+```
+
+Self-hosted runner:
+
+```text
+cicd/self-hosted-runner/README.md
+```
+
+Self-hosted runner RBAC evidence:
+
+```text
+cicd/self-hosted-runner/evidence/kubernetes-rbac-validation.txt
+```
+
+CD deployment evidence:
+
+```text
+cicd/evidence/cd-deployment/v0.3.0-deployment-validation.txt
+```
+
+GitHub Actions workflows:
+
+```text
+.github/workflows/ci.yml
+.github/workflows/release.yml
+.github/workflows/cd.yml
+```
+
+## Current CD Status
+
+The HavenBridge manual Release + self-hosted continuous deployment
+implementation is complete and validated.
+
+Completed milestones include:
+
+* GitHub-hosted CI validated.
+* GHCR publication validated.
+* Semantic-version Release workflow validated.
+* Dedicated self-hosted CD runner provisioned.
+* GitHub Actions runner registered.
+* Runner systemd service enabled and running.
+* Dedicated `github-runner` Linux account configured.
+* Restricted Kubernetes kubeconfig installed.
+* Dedicated `havenbridge-deployer` ServiceAccount configured.
+* Namespace-scoped Role and RoleBinding configured.
+* Positive Deployment authorization test passed.
+* Negative Secret authorization test passed.
+* Release-to-CD workflow chaining validated.
+* Commit-SHA image deployment validated.
+* Kubernetes rollout validation passed.
+* Exact deployed-image verification passed.
+* First end-to-end release `v0.3.0` successfully deployed.

@@ -1,0 +1,159 @@
+HavenBridge Continuous Deployment Validation
+Release: v0.3.0
+Date: 2026-08-18
+
+PURPOSE
+
+Record evidence of the first successful end-to-end HavenBridge
+continuous deployment using the dedicated self-hosted GitHub Actions
+runner.
+
+RELEASE INFORMATION
+
+Semantic version:
+v0.3.0
+
+Release commit:
+e3bacb4f602b2adfb97356f2b75be8731c23d8c7
+
+Human-readable GHCR image:
+
+ghcr.io/brunobrunt/havenbridge-api:v0.3.0
+
+Immutable deployment image:
+
+ghcr.io/brunobrunt/havenbridge-api:e3bacb4f602b2adfb97356f2b75be8731c23d8c7
+
+The semantic version and SHA image represent the same release source
+commit. The CD workflow deploys the SHA-tagged image for precise
+traceability.
+
+RELEASE FLOW
+
+Git tag v0.3.0
+        |
+        v
+HavenBridge Release workflow
+        |
+        v
+FastAPI tests
+        |
+        v
+Docker image build
+        |
+        v
+Kubernetes manifest validation
+        |
+        v
+GitHub Container Registry
+        |
+        v
+HavenBridge CD workflow
+        |
+        v
+havenbridge-runner01
+        |
+        v
+github-runner
+        |
+        v
+restricted Kubernetes kubeconfig
+        |
+        v
+havenbridge-deployer ServiceAccount
+        |
+        v
+havenbridge-api Deployment
+
+GITHUB ACTIONS RELEASE RESULT
+
+HavenBridge Release:
+PASS
+
+The release workflow successfully:
+
+- validated the semantic version tag
+- executed the FastAPI tests
+- built the HavenBridge API container image
+- validated the Kubernetes manifests
+- authenticated to GitHub Container Registry
+- published the v0.3.0 image
+- published the immutable commit-SHA image
+
+GITHUB ACTIONS CD RESULT
+
+HavenBridge CD #1:
+PASS
+
+Successful CD workflow steps:
+
+- Show CD runner identity
+- Validate release SHA
+- Verify Kubernetes access
+- Show currently deployed image
+- Deploy released HavenBridge API image
+- Wait for HavenBridge API rollout
+- Verify deployed image
+
+CLUSTER-SIDE IMAGE VALIDATION
+
+Command executed on havenbridge-runner01:
+
+sudo -u github-runner \
+  KUBECONFIG=/home/github-runner/.kube/config \
+  kubectl get deployment havenbridge-api \
+  -n havenbridge \
+  -o jsonpath='{.spec.template.spec.containers[?(@.name=="havenbridge-api")].image}{"\n"}'
+
+Result:
+
+ghcr.io/brunobrunt/havenbridge-api:e3bacb4f602b2adfb97356f2b75be8731c23d8c7
+
+RESULT:
+PASS
+
+The running Kubernetes Deployment references the exact immutable image
+produced from the v0.3.0 release commit.
+
+ROLLOUT VALIDATION
+
+Command executed on havenbridge-runner01:
+
+sudo -u github-runner \
+  KUBECONFIG=/home/github-runner/.kube/config \
+  kubectl rollout status deployment/havenbridge-api \
+  -n havenbridge
+
+Result:
+
+deployment "havenbridge-api" successfully rolled out
+
+RESULT:
+PASS
+
+SECURITY VALIDATION
+
+The deployment was performed through:
+
+github-runner
+        |
+        v
+/home/github-runner/.kube/config
+        |
+        v
+system:serviceaccount:havenbridge:havenbridge-deployer
+
+The CD workflow does not use the Kubernetes administrator kubeconfig.
+
+Previous RBAC validation proved:
+
+Deployment access: ALLOWED
+Secret access:     DENIED
+
+FINAL RESULT
+
+PASS
+
+HavenBridge v0.3.0 was successfully released, published to GHCR,
+deployed through the dedicated self-hosted GitHub Actions runner and
+verified in Kubernetes using the exact immutable release commit SHA.
