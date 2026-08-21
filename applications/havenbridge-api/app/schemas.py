@@ -13,6 +13,25 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
+class ServiceInquiryStatusUpdate(BaseModel):
+    """
+    Validate a request that changes the workflow status of an inquiry.
+
+    Only approved HavenBridge inquiry statuses are accepted.
+    """
+
+    status: Literal[
+        "new",
+        "reviewing",
+        "referred",
+        "closed",
+    ]
+
+    model_config = ConfigDict(
+        # Reject unexpected JSON fields.
+        extra="forbid",
+    )
+
 class ServiceInquiryCreate(BaseModel):
     """
     Validate the JSON body used to create a service inquiry.

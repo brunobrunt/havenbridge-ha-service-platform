@@ -51,6 +51,7 @@ from app.models import ServiceInquiry
 from app.schemas import (
     ServiceInquiryCreate,
     ServiceInquiryResponse,
+    ServiceInquiryStatusUpdate
 )
 
 
@@ -210,3 +211,84 @@ def list_inquiries(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to retrieve service inquiries.",
         ) from exc
+
+# Define the route that updates the workflow status of an inquiry.
+#
+# The complete endpoint becomes:
+#
+#     PATCH /api/v1/inquiries/{inquiry_id}/status
+
+
+@router.patch(
+    "/{inquiry_id}/status",
+    response_model=ServiceInquiryResponse,
+    summary="Update service inquiry status",
+)
+def update_inquiry_status(
+    inquiry_id: int,
+    status_update: ServiceInquiryStatusUpdate,
+    db: DatabaseSession,
+) -> ServiceInquiry:
+    """
+    Update the workflow status of an existing service inquiry.
+
+    inquiry_id:
+        Identifies the inquiry that should be updated.
+
+    status_update:
+        Contains the new status validated by
+        ServiceInquiryStatusUpdate.
+
+    db:
+        Contains the managed SQLAlchemy database session.
+    """
+
+    try:
+        # Retrieve the inquiry directly by its primary-key ID.
+        inquiry = db.get(ServiceInquiry, inquiry_id)
+
+    except SQLAlchemyError as exc:
+        logger.exception(
+            "Unable to retrieve service inquiry %s.",
+            inquiry_id,
+        )
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to retrieve the service inquiry.",
+        ) from exc
+
+    # A missing database row should be reported as HTTP 404 rather
+    # than treated as an application failure.
+    if inquiry is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Service inquiry not found.",
+        )
+
+    # Pydantic has already restricted this value to an approved
+    # HavenBridge workflow status.
+    inquiry.status = status_update.status
+
+    try:
+        # Persist the status change in PostgreSQL.
+        db.commit()
+
+        # Reload values such as updated_at after PostgreSQL performs
+        # the UPDATE.
+        db.refresh(inquiry)
+
+    except SQLAlchemyError as exc:
+        db.rollback()
+
+        logger.exception(
+            "Unable to update service inquiry %s.",
+            inquiry_id,
+        )
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to update the service inquiry.",
+        ) from exc
+
+    return inquiry

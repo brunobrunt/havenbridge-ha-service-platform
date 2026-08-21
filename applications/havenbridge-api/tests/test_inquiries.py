@@ -114,3 +114,108 @@ def test_list_inquiries_returns_stored_records(
     assert response_body[0]["id"] == 1
     assert response_body[0]["requester_name"] == "Jordan Demo"
     assert response_body[0]["status"] == "new"
+
+
+def test_update_inquiry_status_from_new_to_reviewing(
+    client: TestClient,
+) -> None:
+    """An existing inquiry should allow its status to be updated."""
+
+    create_response = client.post(
+        "/api/v1/inquiries",
+        json=VALID_INQUIRY,
+    )
+
+    assert create_response.status_code == 201
+
+    inquiry_id = create_response.json()["id"]
+
+    update_response = client.patch(
+        f"/api/v1/inquiries/{inquiry_id}/status",
+        json={
+            "status": "reviewing",
+        },
+    )
+
+    assert update_response.status_code == 200
+
+    response_body = update_response.json()
+
+    assert response_body["id"] == inquiry_id
+    assert response_body["status"] == "reviewing"
+
+def test_update_inquiry_status_rejects_invalid_status(
+    client: TestClient,
+) -> None:
+    """An unsupported inquiry status should be rejected."""
+
+    create_response = client.post(
+        "/api/v1/inquiries",
+        json=VALID_INQUIRY,
+    )
+
+    assert create_response.status_code == 201
+
+    inquiry_id = create_response.json()["id"]
+
+    update_response = client.patch(
+        f"/api/v1/inquiries/{inquiry_id}/status",
+        json={
+            "status": "pending",
+        },
+    )
+
+    assert update_response.status_code == 422
+
+
+
+def test_update_inquiry_status_returns_404_for_missing_inquiry(
+    client: TestClient,
+) -> None:
+    """A status update for a nonexistent inquiry should return 404."""
+
+    update_response = client.patch(
+        "/api/v1/inquiries/9999/status",
+        json={
+            "status": "reviewing",
+        },
+    )
+
+    assert update_response.status_code == 404
+    assert update_response.json() == {
+        "detail": "Service inquiry not found."
+    }
+
+def test_updated_inquiry_status_is_returned_by_list_endpoint(
+    client: TestClient,
+) -> None:
+    """A status change should remain visible when inquiries are listed."""
+
+    create_response = client.post(
+        "/api/v1/inquiries",
+        json=VALID_INQUIRY,
+    )
+
+    assert create_response.status_code == 201
+
+    inquiry_id = create_response.json()["id"]
+
+    update_response = client.patch(
+        f"/api/v1/inquiries/{inquiry_id}/status",
+        json={
+            "status": "reviewing",
+        },
+    )
+
+    assert update_response.status_code == 200
+
+    list_response = client.get(
+        "/api/v1/inquiries"
+    )
+
+    assert list_response.status_code == 200
+
+    inquiries = list_response.json()
+
+    assert inquiries[0]["id"] == inquiry_id
+    assert inquiries[0]["status"] == "reviewing"

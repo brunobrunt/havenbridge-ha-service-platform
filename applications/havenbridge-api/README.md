@@ -1,5 +1,6 @@
 ## Local HavenBridge API Startup and Validation
 
+
 The HavenBridge API runs locally on `syrus`, while PostgreSQL runs inside the Kubernetes cluster.
 
 The local connection flow is:
@@ -815,3 +816,285 @@ A concise way to explain the design is:
 > and ORM layer, while Psycopg acts as the PostgreSQL driver. SQLAlchemy
 > manages models, sessions and database operations, while Psycopg provides the
 > underlying communication with PostgreSQL.
+
+
+## Service Inquiry Status Updates
+
+The HavenBridge API supports updating the workflow status of an existing
+service inquiry.
+
+This capability is being introduced as part of the v0.4.0 application
+release.
+
+### Endpoint
+
+```text
+PATCH /api/v1/inquiries/{inquiry_id}/status
+```
+
+The endpoint accepts a JSON body containing the new workflow status.
+
+Example:
+
+```bash
+curl -s \
+  -X PATCH \
+  http://127.0.0.1:8000/api/v1/inquiries/1/status \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "status": "referred"
+  }'
+```
+
+### Approved Workflow Statuses
+
+The currently approved inquiry statuses are:
+
+```text
+new
+reviewing
+referred
+closed
+```
+
+FastAPI validates these values before attempting a database update.
+
+PostgreSQL independently protects the `service_inquiries.status` column with
+the constraint:
+
+```text
+ck_service_inquiries_status
+```
+
+The validation flow is:
+
+```text
+HTTP request
+     ↓
+Pydantic validation
+     ↓
+SQLAlchemy
+     ↓
+PostgreSQL CHECK constraint
+```
+
+This means invalid status values remain blocked even when FastAPI is bypassed
+and SQL is executed directly against PostgreSQL.
+
+### PostgreSQL Constraint Validation
+
+A direct SQL operation was deliberately attempted using an unsupported status.
+
+PostgreSQL rejected the operation with:
+
+```text
+new row for relation "service_inquiries"
+violates check constraint "ck_service_inquiries_status"
+```
+
+This proved that the database-level status constraint is functioning
+independently of FastAPI.
+
+### Successful Status Update Validation
+
+A synthetic inquiry was created through:
+
+```text
+POST /api/v1/inquiries
+```
+
+The new inquiry initially had:
+
+```text
+id     = 1
+status = new
+```
+
+The status-update endpoint was then used to transition the inquiry through:
+
+```text
+new
+ ↓
+reviewing
+ ↓
+referred
+```
+
+The successful PATCH request returned HTTP `200 OK`.
+
+The persisted row was independently checked inside PostgreSQL using:
+
+```sql
+SELECT
+    id,
+    status,
+    created_at,
+    updated_at,
+    updated_at > created_at AS timestamp_updated
+FROM service_inquiries
+WHERE id = 1;
+```
+
+The validation confirmed:
+
+```text
+id                = 1
+status            = referred
+timestamp_updated = true
+```
+
+This proved that the status change was persisted and that `updated_at`
+changed when the database record was modified.
+
+### Invalid Status Validation
+
+An unsupported status was deliberately submitted:
+
+```bash
+curl -i \
+  -X PATCH \
+  http://127.0.0.1:8000/api/v1/inquiries/1/status \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "status": "pending"
+  }'
+```
+
+Result:
+
+```text
+HTTP/1.1 422 Unprocessable Entity
+```
+
+FastAPI reported that the status must be one of:
+
+```text
+new
+reviewing
+referred
+closed
+```
+
+This proves that unsupported workflow statuses are rejected before PostgreSQL
+is modified.
+
+### Missing Inquiry Validation
+
+A valid status was submitted for an inquiry that does not exist:
+
+```bash
+curl -i \
+  -X PATCH \
+  http://127.0.0.1:8000/api/v1/inquiries/9999/status \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "status": "reviewing"
+  }'
+```
+
+Result:
+
+```text
+HTTP/1.1 404 Not Found
+```
+
+The API returned:
+
+```json
+{
+  "detail": "Service inquiry not found."
+}
+```
+
+### Automated Test Coverage
+
+Before this feature was implemented, the HavenBridge API test suite contained
+six passing tests.
+
+Four tests were added for the status-update capability:
+
+```text
+Valid status update                          PASS
+Invalid status returns HTTP 422              PASS
+Missing inquiry returns HTTP 404             PASS
+Updated status remains visible through GET   PASS
+```
+
+The complete suite was then executed:
+
+```bash
+pytest -q
+```
+
+Result:
+
+```text
+10 passed
+```
+
+The current Starlette test-client deprecation warning does not cause any test
+failures and can be handled later as a dependency-maintenance item.
+
+### Python Syntax Validation
+
+The modified Python files were checked with:
+
+```bash
+python -m py_compile \
+  app/schemas.py \
+  app/routers/inquiries.py \
+  tests/conftest.py
+```
+
+A successful command returned no output.
+
+The difference between the two validation tools is:
+
+```text
+py_compile = validates Python syntax
+pytest     = validates tested application behavior
+```
+
+### Real PostgreSQL Validation Path
+
+Local FastAPI testing on `syrus` reaches PostgreSQL through:
+
+```text
+FastAPI on syrus
+      ↓
+127.0.0.1:25432
+      ↓
+havenbridge-postgres-ssh-tunnel.service
+      ↓
+eph-cp01:127.0.0.1:25432
+      ↓
+havenbridge-postgres-portforward.service
+      ↓
+havenbridge-postgres-0:5432
+      ↓
+PostgreSQL database: havenbridge
+```
+
+Both forwarding services bind only to `127.0.0.1`, so PostgreSQL is not
+directly exposed to the lab network.
+
+### v0.4.0 Pre-Release Validation
+
+```text
+Python syntax validation                 PASS
+Original regression tests                PASS
+Valid status-update test                 PASS
+Invalid-status HTTP 422 test             PASS
+Missing-inquiry HTTP 404 test            PASS
+Updated-status GET verification          PASS
+Real FastAPI POST validation             PASS
+Real FastAPI PATCH validation            PASS
+PostgreSQL CHECK constraint validation   PASS
+Direct PostgreSQL persistence check      PASS
+updated_at verification                  PASS
+Full pytest suite: 10 tests              PASS
+```
+
+The next stage is to commit the application changes, allow HavenBridge CI to
+validate them, create the `v0.4.0` semantic release tag, and validate the
+release through the self-hosted CD pipeline.

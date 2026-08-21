@@ -87,6 +87,7 @@ class FakeDatabaseSession:
         self.rollback_called = False
 
         self._pending_record: Any | None = None
+        self._selected_record: Any | None = None
         self._next_id = 1
 
     def add(self, record: Any) -> None:
@@ -114,10 +115,14 @@ class FakeDatabaseSession:
         response exactly as it would after a real database insert.
         """
 
-        if self._pending_record is None:
-            return
-
         current_time = datetime.now(timezone.utc)
+
+        if self._pending_record is None:
+            if self._selected_record is not None:
+                self._selected_record.updated_at = current_time
+                self._selected_record = None
+
+            return
 
         self._pending_record.id = self._next_id
 
@@ -153,6 +158,24 @@ class FakeDatabaseSession:
 
         self.rollback_called = True
         self._pending_record = None
+
+    def get(
+        self,
+        model: Any,
+        record_id: int,
+    ) -> Any | None:
+        """
+        Return one stored record by primary-key ID.
+
+        This simulates SQLAlchemy Session.get().
+        """
+
+        for record in self.records:
+            if record.id == record_id:
+                self._selected_record = record
+                return record
+
+        return None
 
     def scalars(self, statement: Any) -> FakeScalarResult:
         """
