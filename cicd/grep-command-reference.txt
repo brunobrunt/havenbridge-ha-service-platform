@@ -1,0 +1,309 @@
+HavenBridge grep Command Reference
+===================================
+
+Purpose
+-------
+This reference collects the grep commands used during the HavenBridge project
+so they can be reused for troubleshooting, code inspection, validation, and
+finding previous shell commands.
+
+Suggested repository location:
+  /home/alabi/projects/havenbridge-ha-service-platform/cicd/grep-command-reference.txt
+
+
+1. Search for HavenBridge service-inquiry code
+-----------------------------------------------
+
+Command:
+grep -RInE \
+  'service-inquiries|service_inquiries|ServiceInquiry|@app\.|@router\.' \
+  /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/app \
+  /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/tests \
+  2>/dev/null
+
+What it does:
+- -R  = search recursively through directories
+- -I  = ignore binary files
+- -n  = show line numbers
+- -E  = use extended regular expressions
+- | inside the quoted pattern means OR
+- 2>/dev/null hides error messages such as unreadable paths
+
+Useful for:
+Finding API routes, models, schemas, and service-inquiry references.
+
+
+2. Find which Ansible playbook uses the cluster_endpoint role
+-------------------------------------------------------------
+
+Command:
+grep -RIn 'cluster_endpoint' \
+  /home/alabi/projects/havenbridge-ha-service-platform/ansible/playbooks
+
+What it does:
+Searches all Ansible playbooks recursively for the text "cluster_endpoint"
+and prints the matching filename and line number.
+
+
+3. Show the ServiceInquiryStatusUpdate schema with surrounding lines
+--------------------------------------------------------------------
+
+Command:
+grep -n -A20 -B3 'ServiceInquiryStatusUpdate' \
+  /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/app/schemas.py
+
+What it does:
+- -n   = show line numbers
+- -A20 = show 20 lines After the match
+- -B3  = show 3 lines Before the match
+
+
+4. Show the new PATCH endpoint with surrounding lines
+------------------------------------------------------
+
+Command:
+grep -n -A75 -B5 '@router.patch' \
+  /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/app/routers/inquiries.py
+
+Useful for:
+Reviewing a FastAPI route without printing the entire file.
+
+
+5. Check where _selected_record was added
+------------------------------------------
+
+Command:
+grep -n -A3 -B2 '_selected_record' \
+  /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/tests/conftest.py
+
+
+6. Show the fake database get() method
+---------------------------------------
+
+Command:
+grep -n -A20 -B3 'def get' \
+  /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/tests/conftest.py
+
+
+7. Show the important methods inside FakeDatabaseSession
+---------------------------------------------------------
+
+Command:
+grep -nE 'class FakeDatabaseSession|def __init__|def add|def commit|def refresh|def rollback|def get|def scalars|def execute' \
+  /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/tests/conftest.py
+
+What it does:
+Uses an extended regular expression to show only the important class and
+method definition lines.
+
+
+8. Find PostgreSQL ports and database configuration
+----------------------------------------------------
+
+Command:
+grep -RInE '15432|25432|DATABASE_URL|POSTGRES' \
+  /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/app \
+  /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/.env* \
+  2>/dev/null
+
+Useful for:
+Finding PostgreSQL host settings, ports, DATABASE_URL references, old port
+15432, and current tunnel port 25432.
+
+Security note:
+Be careful when searching environment files. Do not paste passwords or secret
+values into chat, tickets, documentation, or Git.
+
+
+9. Search shell history for how the PostgreSQL secret file was created
+-----------------------------------------------------------------------
+
+Command:
+grep -nE \
+  'postgres-password|runtime-secrets|chown|kubectl get secret' \
+  ~/.bash_history | tail -30
+
+Why this command was useful:
+It helped determine why the local PostgreSQL password file had ownership:
+
+  systemd-network:systemd-journal
+
+The shell history showed that these commands had previously been run:
+
+  sudo chown 100:101 ...
+  sudo chmod 0400 ...
+
+The numeric UID/GID were being used for a Docker container user. On the host,
+those numeric IDs happened to map to systemd-network and systemd-journal.
+
+What the pieces mean:
+- grep -nE = search using extended patterns and include history line numbers
+- ~/.bash_history = Bash command history
+- | = pipe the grep results into another command
+- tail -30 = show only the last 30 matching lines
+
+Very useful for:
+- Recovering old troubleshooting commands
+- Finding how a file was created
+- Finding previous kubectl commands
+- Finding chmod/chown changes
+- Finding old SSH tunnel or Docker commands
+
+
+10. Find HavenBridge systemd services
+--------------------------------------
+
+Command:
+systemctl list-units --type=service | grep -i havenbridge
+
+Used on syrus to find:
+  havenbridge-postgres-ssh-tunnel.service
+
+Used on eph-cp01 to find:
+  havenbridge-postgres-portforward.service
+
+
+11. Confirm which process is listening on PostgreSQL tunnel port 25432
+---------------------------------------------------------------------
+
+Command:
+ss -lntp | grep 25432
+
+On syrus, expected process:
+  ssh
+
+On eph-cp01, expected process:
+  kubectl
+
+Important validation:
+The listener should be:
+
+  127.0.0.1:25432
+
+not:
+
+  0.0.0.0:25432
+
+
+12. Useful grep patterns to remember
+-------------------------------------
+
+Find a simple word:
+grep -n 'word' file.txt
+
+Case-insensitive search:
+grep -ni 'havenbridge' file.txt
+
+Recursive search:
+grep -RIn 'text' /path/to/directory
+
+Search for several alternatives:
+grep -nE 'error|failed|warning' file.txt
+
+Show lines after a match:
+grep -n -A10 'pattern' file.txt
+
+Show lines before a match:
+grep -n -B5 'pattern' file.txt
+
+Show lines before and after:
+grep -n -A10 -B5 'pattern' file.txt
+
+Hide permission/error messages:
+grep -RIn 'pattern' /path 2>/dev/null
+
+Search command history:
+grep -nE 'kubectl|docker|ssh' ~/.bash_history | tail -50
+
+
+13. Understanding the most common grep options used in HavenBridge
+-------------------------------------------------------------------
+
+-n
+  Show the line number where the match occurs.
+
+-R
+  Search directories recursively.
+
+-I
+  Ignore binary files.
+
+-E
+  Use extended regular expressions.
+
+-i
+  Ignore uppercase/lowercase differences.
+
+-A N
+  Show N lines after the match.
+
+-B N
+  Show N lines before the match.
+
+-C N
+  Show N lines before and after the match.
+
+-v
+  Show lines that do NOT match.
+
+-l
+  Print only filenames containing a match.
+
+2>/dev/null
+  Not a grep option. This shell redirection hides error output.
+
+|
+  Not a grep option. This shell pipe passes the output of one command into
+  another command.
+
+
+14. Practical HavenBridge troubleshooting examples
+----------------------------------------------------
+
+Find all references to the current PostgreSQL tunnel port:
+grep -RIn '25432' \
+  /home/alabi/projects/havenbridge-ha-service-platform \
+  2>/dev/null
+
+Find old references to port 15432:
+grep -RIn '15432' \
+  /home/alabi/projects/havenbridge-ha-service-platform \
+  2>/dev/null
+
+Find FastAPI route decorators:
+grep -RInE '@router\.(get|post|patch|put|delete)' \
+  /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/app
+
+Find Python test functions:
+grep -RInE '^def test_' \
+  /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api/tests
+
+Find Kubernetes resources by kind:
+grep -RInE '^kind: (Deployment|Service|Secret|Role|RoleBinding|StatefulSet)' \
+  /home/alabi/projects/havenbridge-ha-service-platform/kubernetes
+
+Find systemd-related documentation in the repository:
+grep -RInE 'systemd|port-forward|ssh-tunnel' \
+  /home/alabi/projects/havenbridge-ha-service-platform \
+  2>/dev/null
+
+Find TODO/FIXME notes:
+grep -RInE 'TODO|FIXME' \
+  /home/alabi/projects/havenbridge-ha-service-platform \
+  2>/dev/null
+
+
+Quick mental model
+------------------
+
+grep answers:
+  "Where does this text appear?"
+
+sed answers:
+  "Show me this exact section of a file."
+
+git diff answers:
+  "What changed?"
+
+Together they are extremely useful when inspecting and troubleshooting the
+HavenBridge repository.
