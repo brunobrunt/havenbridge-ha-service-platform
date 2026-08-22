@@ -1,0 +1,318 @@
+HAVENBRIDGE v0.4.0 CONTINUOUS DEPLOYMENT VALIDATION
+===================================================
+
+PURPOSE
+-------
+
+Validate that HavenBridge release v0.4.0 successfully completed the full
+Release -> GHCR -> self-hosted CD -> Kubernetes deployment path and that the
+new service-inquiry status-update feature works in the deployed environment.
+
+
+RELEASE INFORMATION
+-------------------
+
+Release:
+v0.4.0
+
+Commit:
+f4c146b97297455432ff37b9641e88806133ec0b
+
+Commit message:
+feat: add service inquiry status updates
+
+Release feature:
+PATCH /api/v1/inquiries/{inquiry_id}/status
+
+
+PRE-RELEASE APPLICATION VALIDATION
+----------------------------------
+
+Python syntax validation:
+PASS
+
+pytest:
+10 passed
+
+Validated application behavior:
+
+- Valid status update -> HTTP 200
+- Invalid status -> HTTP 422
+- Missing inquiry -> HTTP 404
+- Updated status visible through GET
+- PostgreSQL CHECK constraint rejects invalid statuses
+
+
+CI RESULT
+---------
+
+The normal HavenBridge CI workflow ran for commit:
+
+f4c146b97297455432ff37b9641e88806133ec0b
+
+Validated:
+
+- HavenBridge API tests
+- Docker image build
+- Kubernetes manifest validation
+- GHCR authentication
+- GHCR image tagging
+- GHCR image publication
+
+Result:
+PASS
+
+
+RELEASE RESULT
+--------------
+
+Annotated Git tag:
+
+v0.4.0
+
+Tag message:
+
+HavenBridge v0.4.0 - service inquiry status updates
+
+The HavenBridge Release workflow completed successfully.
+
+Result:
+PASS
+
+
+RELEASE-TO-CD HANDOFF
+---------------------
+
+The HavenBridge CD workflow is triggered by completion of the
+HavenBridge Release workflow.
+
+CD proceeds only when the Release workflow conclusion is successful.
+
+The v0.4.0 Release successfully triggered the self-hosted CD workflow.
+
+Result:
+PASS
+
+
+DEPLOYED IMAGE
+--------------
+
+Kubernetes Deployment:
+
+havenbridge-api
+
+Namespace:
+
+havenbridge
+
+Expected image:
+
+ghcr.io/brunobrunt/havenbridge-api:f4c146b97297455432ff37b9641e88806133ec0b
+
+Verification command:
+
+kubectl get deployment havenbridge-api \
+  -n havenbridge \
+  -o jsonpath='{.spec.template.spec.containers[?(@.name=="havenbridge-api")].image}{"\n"}'
+
+Observed:
+
+ghcr.io/brunobrunt/havenbridge-api:f4c146b97297455432ff37b9641e88806133ec0b
+
+Important:
+
+The kubectl get command only reads the Deployment configuration.
+
+It did not change the image.
+
+The image was changed earlier by the CD workflow using kubectl set image.
+
+Result:
+PASS
+
+
+ROLLOUT VALIDATION
+------------------
+
+Command:
+
+kubectl rollout status \
+  deployment/havenbridge-api \
+  -n havenbridge \
+  --timeout=180s
+
+Result:
+
+deployment "havenbridge-api" successfully rolled out
+
+Status:
+PASS
+
+
+POD VALIDATION
+--------------
+
+Two HavenBridge API Pods were running successfully.
+
+Pod placement:
+
+eph-worker01
+eph-worker02
+
+Both Pods:
+
+1/1 Running
+
+Result:
+PASS
+
+
+GATEWAY VALIDATION
+------------------
+
+Application hostname:
+
+havenbridge.lab
+
+Application Gateway IP:
+
+172.16.10.40
+
+From syrus:
+
+curl -k -i https://havenbridge.lab/
+
+Result:
+
+HTTP/2 200
+
+From eph-cp01, havenbridge.lab did not resolve locally.
+
+The Gateway path was therefore tested using:
+
+curl -k -i \
+  --resolve havenbridge.lab:443:172.16.10.40 \
+  https://havenbridge.lab/
+
+Result:
+
+HTTP/2 200
+
+This proved the application path through:
+
+Gateway IP
+-> Traefik
+-> HTTPRoute
+-> havenbridge-api Service
+-> API Pods
+
+Status:
+PASS
+
+
+DEPLOYED PATCH FEATURE VALIDATION
+---------------------------------
+
+Request:
+
+curl -k -i \
+  --resolve havenbridge.lab:443:172.16.10.40 \
+  -X PATCH \
+  https://havenbridge.lab/api/v1/inquiries/1/status \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "status": "closed"
+  }'
+
+Result:
+
+HTTP/2 200
+
+Returned status:
+
+closed
+
+Status:
+PASS
+
+
+POSTGRESQL PERSISTENCE VALIDATION
+---------------------------------
+
+PostgreSQL was entered directly using:
+
+kubectl exec -it \
+  -n havenbridge \
+  havenbridge-postgres-0 \
+  -c postgresql \
+  -- psql \
+  -U havenbridge_admin \
+  -d havenbridge
+
+Query:
+
+SELECT
+    id,
+    requester_name,
+    status,
+    created_at,
+    updated_at
+FROM service_inquiries
+WHERE id = 1;
+
+Observed:
+
+id:
+1
+
+requester_name:
+Version 0.4 Test
+
+status:
+closed
+
+updated_at:
+2026-08-21 16:14:48.550344+00
+
+Result:
+PASS
+
+
+FINAL RESULT
+------------
+
+HavenBridge v0.4.0 successfully completed:
+
+CI
+-> semantic release
+-> GHCR publication
+-> Release-to-CD handoff
+-> self-hosted CD deployment
+-> Kubernetes rollout
+-> Gateway validation
+-> deployed PATCH endpoint validation
+-> PostgreSQL persistence validation
+
+FINAL STATUS:
+PASS
+
+
+FOLLOW-UP ITEMS
+---------------
+
+1. eph-cp01 does not currently resolve havenbridge.lab.
+
+   The application is reachable using:
+
+   --resolve havenbridge.lab:443:172.16.10.40
+
+   Lab DNS or /etc/hosts management should be reviewed later.
+
+2. The API root response currently reports:
+
+   "version": "0.1.0"
+
+   even though the deployed release is v0.4.0.
+
+   Application version reporting should be aligned with the actual deployed
+   version in a future change.

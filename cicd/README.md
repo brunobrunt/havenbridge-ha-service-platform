@@ -1484,6 +1484,406 @@ Detailed evidence for the first successful deployment is stored at:
 cicd/evidence/cd-deployment/v0.3.0-deployment-validation.txt
 ```
 
+
+## Second Successful End-to-End CD Deployment: v0.4.0
+
+HavenBridge `v0.4.0` provided a second complete validation of the
+Release → GHCR → self-hosted CD → Kubernetes delivery path.
+
+Unlike `v0.3.0`, which primarily established and validated the CD
+infrastructure, `v0.4.0` contained a real application feature:
+
+```text
+PATCH /api/v1/inquiries/{inquiry_id}/status
+```
+
+The release used:
+
+```text
+Release:
+v0.4.0
+
+Commit:
+f4c146b97297455432ff37b9641e88806133ec0b
+
+Commit message:
+feat: add service inquiry status updates
+```
+
+Before the release tag was created, the normal HavenBridge CI workflow
+completed successfully for the application commit.
+
+The CI workflow validated:
+
+```text
+Detect HavenBridge API changes        PASS
+Run HavenBridge API tests             PASS
+Build HavenBridge API Docker image    PASS
+Validate Kubernetes manifests         PASS
+Log in to GHCR                        PASS
+Tag image for GHCR                    PASS
+Push image to GHCR                    PASS
+```
+
+The annotated Git tag:
+
+```text
+v0.4.0
+```
+
+then triggered the `HavenBridge Release` workflow.
+
+After the Release workflow completed successfully, the
+`HavenBridge CD` workflow started automatically.
+
+The release-to-CD relationship is:
+
+```text
+v0.4.0 Git tag
+        ↓
+HavenBridge Release
+        ↓
+Release succeeds
+        ↓
+HavenBridge CD
+        ↓
+Self-hosted runner
+        ↓
+Kubernetes
+```
+
+CD is not triggered independently by the tag. It waits for the Release
+workflow to complete successfully.
+
+### How the CD Workflow Changes the Kubernetes Image
+
+The image change is performed by this operation in `.github/workflows/cd.yml`:
+
+```bash
+IMAGE="ghcr.io/brunobrunt/havenbridge-api:${RELEASE_SHA}"
+
+kubectl set image \
+  deployment/"${DEPLOYMENT}" \
+  "${CONTAINER}"="${IMAGE}" \
+  -n "${NAMESPACE}"
+```
+
+For `v0.4.0`, the release SHA was:
+
+```text
+f4c146b97297455432ff37b9641e88806133ec0b
+```
+
+Therefore the image deployed by CD was:
+
+```text
+ghcr.io/brunobrunt/havenbridge-api:f4c146b97297455432ff37b9641e88806133ec0b
+```
+
+`kubectl set image` is the command that changes the Deployment Pod
+template.
+
+Conceptually:
+
+```text
+kubectl set image
+        ↓
+Deployment Pod template changes
+        ↓
+Kubernetes detects the new template
+        ↓
+New ReplicaSet is created
+        ↓
+New Pods start with the new image
+        ↓
+Old Pods are replaced
+```
+
+The next CD command:
+
+```bash
+kubectl rollout status \
+  deployment/"${DEPLOYMENT}" \
+  -n "${NAMESPACE}" \
+  --timeout=180s
+```
+
+does not change the image. It waits for Kubernetes to complete the new
+rollout successfully.
+
+A later command such as:
+
+```bash
+kubectl get deployment havenbridge-api \
+  -n havenbridge \
+  -o jsonpath='{.spec.template.spec.containers[?(@.name=="havenbridge-api")].image}{"\n"}'
+```
+
+also does not change the image.
+
+It only reads the Deployment and shows which image is currently
+configured.
+
+The distinction is:
+
+```text
+kubectl set image       = CHANGE the Deployment image
+kubectl rollout status  = WAIT for / VERIFY the rollout
+kubectl get             = READ / VERIFY the configured image
+```
+
+### Cluster-Side v0.4.0 Image Validation
+
+The deployed image was independently checked from the Kubernetes
+environment.
+
+Command:
+
+```bash
+kubectl get deployment havenbridge-api \
+  -n havenbridge \
+  -o jsonpath='{.spec.template.spec.containers[?(@.name=="havenbridge-api")].image}{"\n"}'
+```
+
+Result:
+
+```text
+ghcr.io/brunobrunt/havenbridge-api:f4c146b97297455432ff37b9641e88806133ec0b
+```
+
+This proved that Kubernetes was configured with the exact image produced
+from the `v0.4.0` release commit.
+
+### Kubernetes Rollout Validation for v0.4.0
+
+Command:
+
+```bash
+kubectl rollout status \
+  deployment/havenbridge-api \
+  -n havenbridge \
+  --timeout=180s
+```
+
+Result:
+
+```text
+deployment "havenbridge-api" successfully rolled out
+```
+
+Two HavenBridge API Pods were confirmed running:
+
+```text
+havenbridge-api-5c8bf7fcd7-c8ggj   1/1   Running   eph-worker01
+havenbridge-api-5c8bf7fcd7-wt5xc   1/1   Running   eph-worker02
+```
+
+This also confirmed that the API replicas were distributed across the
+two worker nodes.
+
+### Gateway Validation for v0.4.0
+
+From `syrus`, the API was reachable using:
+
+```bash
+curl -k -i https://havenbridge.lab/
+```
+
+Result:
+
+```text
+HTTP/2 200
+```
+
+On `eph-cp01`, `havenbridge.lab` did not resolve locally.
+
+The application Gateway path was therefore tested without changing DNS
+by using:
+
+```bash
+curl -k -i \
+  --resolve havenbridge.lab:443:172.16.10.40 \
+  https://havenbridge.lab/
+```
+
+Result:
+
+```text
+HTTP/2 200
+```
+
+This validated the application path through:
+
+```text
+eph-cp01
+    ↓
+172.16.10.40
+    ↓
+Traefik / Gateway API
+    ↓
+HTTPRoute
+    ↓
+havenbridge-api Service
+    ↓
+HavenBridge API Pods
+```
+
+The missing `havenbridge.lab` name resolution on `eph-cp01` is a
+separate lab DNS/hosts follow-up and did not prevent application
+validation.
+
+### Deployed PATCH Feature Validation
+
+The new `v0.4.0` status-update endpoint was tested against the
+Kubernetes-deployed application:
+
+```bash
+curl -k -i \
+  --resolve havenbridge.lab:443:172.16.10.40 \
+  -X PATCH \
+  https://havenbridge.lab/api/v1/inquiries/1/status \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "status": "closed"
+  }'
+```
+
+Result:
+
+```text
+HTTP/2 200
+```
+
+The API response confirmed:
+
+```text
+id:
+1
+
+requester_name:
+Version 0.4 Test
+
+status:
+closed
+
+updated_at:
+2026-08-21T16:14:48.550344Z
+```
+
+### PostgreSQL Persistence Validation
+
+The persisted value was then verified independently inside PostgreSQL.
+
+PostgreSQL access:
+
+```bash
+kubectl exec -it \
+  -n havenbridge \
+  havenbridge-postgres-0 \
+  -c postgresql \
+  -- psql \
+  -U havenbridge_admin \
+  -d havenbridge
+```
+
+Query:
+
+```sql
+SELECT
+    id,
+    requester_name,
+    status,
+    created_at,
+    updated_at
+FROM service_inquiries
+WHERE id = 1;
+```
+
+Result:
+
+```text
+id             = 1
+requester_name = Version 0.4 Test
+status         = closed
+updated_at     = 2026-08-21 16:14:48.550344+00
+```
+
+This proved that the new status was not only returned by the API but was
+also committed successfully to PostgreSQL.
+
+### v0.4.0 End-to-End Result
+
+The complete validated path was:
+
+```text
+Application feature
+        ↓
+Commit f4c146b...
+        ↓
+Normal CI
+        ↓
+Annotated tag v0.4.0
+        ↓
+HavenBridge Release
+        ↓
+GHCR
+        ↓
+HavenBridge CD
+        ↓
+havenbridge-runner01
+        ↓
+kubectl set image
+        ↓
+Kubernetes rollout
+        ↓
+Gateway validation
+        ↓
+PATCH feature validation
+        ↓
+PostgreSQL persistence validation
+```
+
+Validation summary:
+
+```text
+CI application tests                    PASS
+Docker build                            PASS
+Kubernetes manifest validation          PASS
+GHCR publication                        PASS
+v0.4.0 Release workflow                 PASS
+Release-to-CD workflow handoff          PASS
+Self-hosted CD deployment               PASS
+Exact SHA image verification            PASS
+Kubernetes rollout                      PASS
+Two API Pods running                    PASS
+Gateway HTTP/2 access                   PASS
+Deployed PATCH endpoint                 PASS
+PostgreSQL persistence verification     PASS
+```
+
+Final result:
+
+```text
+PASS
+```
+
+Detailed evidence is stored at:
+
+```text
+cicd/evidence/cd-deployment/v0.4.0-deployment-validation.txt
+```
+
+Two non-blocking follow-up items were identified during this validation:
+
+1. `eph-cp01` does not currently resolve `havenbridge.lab`; the Gateway
+   remained reachable when the host-to-IP mapping was supplied with
+   `curl --resolve`.
+
+2. The API root response currently reports `"version":"0.1.0"` even
+   though the deployed release is `v0.4.0`. Application version reporting
+   should later be aligned with the actual deployed release.
+
+
 ## CD Troubleshooting
 
 ### CD Workflow Does Not Start
@@ -1675,6 +2075,7 @@ CD deployment evidence:
 
 ```text
 cicd/evidence/cd-deployment/v0.3.0-deployment-validation.txt
+cicd/evidence/cd-deployment/v0.4.0-deployment-validation.txt
 ```
 
 GitHub Actions workflows:
@@ -1709,3 +2110,6 @@ Completed milestones include:
 * Kubernetes rollout validation passed.
 * Exact deployed-image verification passed.
 * First end-to-end release `v0.3.0` successfully deployed.
+* Second end-to-end release `v0.4.0` successfully deployed.
+* Real `PATCH /api/v1/inquiries/{inquiry_id}/status` application change validated through the Gateway.
+* PostgreSQL persistence of the deployed `v0.4.0` status update independently verified.

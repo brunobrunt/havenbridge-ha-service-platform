@@ -1078,23 +1078,222 @@ PostgreSQL database: havenbridge
 Both forwarding services bind only to `127.0.0.1`, so PostgreSQL is not
 directly exposed to the lab network.
 
-### v0.4.0 Pre-Release Validation
+
+### v0.4.0 Release and Kubernetes Validation
+
+The service-inquiry status-update feature was released as:
 
 ```text
-Python syntax validation                 PASS
-Original regression tests                PASS
-Valid status-update test                 PASS
-Invalid-status HTTP 422 test             PASS
-Missing-inquiry HTTP 404 test            PASS
-Updated-status GET verification          PASS
-Real FastAPI POST validation             PASS
-Real FastAPI PATCH validation            PASS
-PostgreSQL CHECK constraint validation   PASS
-Direct PostgreSQL persistence check      PASS
-updated_at verification                  PASS
-Full pytest suite: 10 tests              PASS
+v0.4.0
 ```
 
-The next stage is to commit the application changes, allow HavenBridge CI to
-validate them, create the `v0.4.0` semantic release tag, and validate the
-release through the self-hosted CD pipeline.
+Release commit:
+
+```text
+f4c146b97297455432ff37b9641e88806133ec0b
+```
+
+The normal CI workflow first validated the application change.
+
+The `v0.4.0` Git tag then triggered the HavenBridge Release workflow, which
+built and published the release images to GHCR.
+
+After the Release workflow completed successfully, the HavenBridge CD workflow
+automatically ran on the self-hosted runner.
+
+The CD workflow updated the Kubernetes Deployment to:
+
+```text
+ghcr.io/brunobrunt/havenbridge-api:f4c146b97297455432ff37b9641e88806133ec0b
+```
+
+The deployed image was verified with:
+
+```bash
+kubectl get deployment havenbridge-api \
+  -n havenbridge \
+  -o jsonpath='{.spec.template.spec.containers[?(@.name=="havenbridge-api")].image}{"\n"}'
+```
+
+Important:
+
+The `kubectl get deployment` command does not modify the Deployment.
+
+It only reads the image currently configured in the Deployment.
+
+The actual image change was performed earlier by the CD workflow using
+`kubectl set image`.
+
+The deployment rollout was verified with:
+
+```bash
+kubectl rollout status \
+  deployment/havenbridge-api \
+  -n havenbridge \
+  --timeout=180s
+```
+
+Result:
+
+```text
+deployment "havenbridge-api" successfully rolled out
+```
+
+Two application Pods were confirmed running:
+
+```text
+havenbridge-api-5c8bf7fcd7-c8ggj   1/1   Running   eph-worker01
+havenbridge-api-5c8bf7fcd7-wt5xc   1/1   Running   eph-worker02
+```
+
+### Gateway Validation
+
+The deployed API was successfully reached through the HavenBridge application
+Gateway.
+
+On `syrus`:
+
+```bash
+curl -k -i https://havenbridge.lab/
+```
+
+returned:
+
+```text
+HTTP/2 200
+```
+
+On `eph-cp01`, `havenbridge.lab` was not locally resolvable, so the Gateway IP
+was supplied explicitly:
+
+```bash
+curl -k -i \
+  --resolve havenbridge.lab:443:172.16.10.40 \
+  https://havenbridge.lab/
+```
+
+This also returned:
+
+```text
+HTTP/2 200
+```
+
+This confirmed that the Gateway, Traefik routing, HTTPRoute, Service, and API
+Pods were functioning correctly.
+
+The missing `havenbridge.lab` name resolution on `eph-cp01` is a separate lab
+DNS/hosts follow-up and did not affect the deployed application.
+
+### Deployed PATCH Validation
+
+The new v0.4.0 endpoint was tested through the Kubernetes Gateway:
+
+```bash
+curl -k -i \
+  --resolve havenbridge.lab:443:172.16.10.40 \
+  -X PATCH \
+  https://havenbridge.lab/api/v1/inquiries/1/status \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "status": "closed"
+  }'
+```
+
+Result:
+
+```text
+HTTP/2 200
+```
+
+The API response confirmed:
+
+```text
+id     = 1
+status = closed
+```
+
+The database change was then independently verified inside the PostgreSQL Pod:
+
+```bash
+kubectl exec -it \
+  -n havenbridge \
+  havenbridge-postgres-0 \
+  -c postgresql \
+  -- psql \
+  -U havenbridge_admin \
+  -d havenbridge
+```
+
+Using:
+
+```sql
+SELECT
+    id,
+    requester_name,
+    status,
+    created_at,
+    updated_at
+FROM service_inquiries
+WHERE id = 1;
+```
+
+Result:
+
+```text
+id             = 1
+requester_name = Version 0.4 Test
+status         = closed
+updated_at     = 2026-08-21 16:14:48.550344+00
+```
+
+This proved the full production-style v0.4.0 path:
+
+```text
+Git tag v0.4.0
+       ↓
+Release workflow
+       ↓
+GHCR
+       ↓
+CD workflow
+       ↓
+Self-hosted runner
+       ↓
+Kubernetes Deployment
+       ↓
+Traefik / Gateway API
+       ↓
+HavenBridge API
+       ↓
+PATCH status update
+       ↓
+PostgreSQL persistence
+```
+
+### v0.4.0 Final Validation Status
+
+```text
+CI application tests                     PASS
+Docker build                             PASS
+Kubernetes manifest validation           PASS
+GHCR publication                         PASS
+v0.4.0 Release workflow                  PASS
+Release-to-CD workflow handoff           PASS
+Self-hosted CD deployment                PASS
+Exact SHA image verification             PASS
+Kubernetes rollout                       PASS
+Two API Pods running                     PASS
+Gateway HTTP/2 access                    PASS
+Deployed PATCH endpoint                  PASS
+PostgreSQL persistence verification      PASS
+```
+
+One follow-up item was identified during validation:
+
+```text
+GET / currently reports application version 0.1.0
+while the deployed release is v0.4.0.
+```
+
+Application version reporting should be updated in a future change so the API
+reports the actual deployed release/version.
