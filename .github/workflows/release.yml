@@ -49,7 +49,15 @@ jobs:
         run: python -m pytest
 
       - name: Build HavenBridge API Docker image
-        run: docker build --tag havenbridge-api:release .
+        run: |
+          APP_VERSION="${GITHUB_REF_NAME#v}"
+
+          echo "Building HavenBridge API version ${APP_VERSION}"
+
+          docker build \
+            --build-arg APP_VERSION="${APP_VERSION}" \
+            --tag havenbridge-api:release \
+            .
 
       - name: Install Kubeconform
         run: |

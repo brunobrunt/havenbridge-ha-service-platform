@@ -1,6 +1,13 @@
 # Start with an official lightweight Python 3.12 image.
 FROM python:3.12-slim
 
+# Accept the HavenBridge application version during the Docker build.
+# Official release builds override "unreleased" with the semantic version.
+ARG APP_VERSION="unreleased"
+
+# Make the build-time version available to the running application.
+ENV APP_VERSION="${APP_VERSION}"
+
 # Add OCI metadata for GitHub Container Registry.
 LABEL org.opencontainers.image.source="https://github.com/brunobrunt/havenbridge-ha-service-platform" \
       org.opencontainers.image.description="FastAPI backend for the HavenBridge service inquiry and referral tracking platform"

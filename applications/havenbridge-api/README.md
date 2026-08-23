@@ -487,6 +487,9 @@ Always use this order during local development:
 6. Confirm the inquiry using GET or PostgreSQL
 ```
 
+## # Document the port used by Uvicorn.
+## Uvicorn is the web server that runs the FastAPI application and listens for incoming HTTP requests.
+
 Starting Uvicorn before the SSH tunnel can cause:
 
 ```text
@@ -635,18 +638,38 @@ Detailed commands and troubleshooting steps are recorded in:
 /home/alabi/projects/havenbridge-ha-service-platform/kubernetes/platform/runbooks/havenbridge-api-postgresql-validation.txt
 ```
 
-## Next Application Step
+### Next Application Step
+#
+#The next step is to:
+#
+#1. Publish `havenbridge-api:0.1.0` to a container registry
+#2. Deploy the API as a Kubernetes Deployment
+#3. Create an internal ClusterIP Service
+#4. Configure PostgreSQL access through Kubernetes Secrets and ConfigMaps
+#5. Add readiness and liveness probes
+#6. Add CPU and memory requests and limits
+#7. Validate direct in-cluster API-to-PostgreSQL communication
+#8. Expose the API through Traefik and Gateway API
 
-The next step is to:
 
-1. Publish `havenbridge-api:0.1.0` to a container registry
-2. Deploy the API as a Kubernetes Deployment
-3. Create an internal ClusterIP Service
-4. Configure PostgreSQL access through Kubernetes Secrets and ConfigMaps
-5. Add readiness and liveness probes
-6. Add CPU and memory requests and limits
-7. Validate direct in-cluster API-to-PostgreSQL communication
-8. Expose the API through Traefik and Gateway API
+## Current Application Direction
+
+The original `havenbridge-api:0.1.0` container-validation milestone has been
+completed.
+
+The HavenBridge API is now:
+
+- published through GHCR;
+- deployed to Kubernetes;
+- exposed through Traefik and Gateway API;
+- integrated with PostgreSQL;
+- protected with readiness and liveness probes;
+- released through semantic Git tags;
+- deployed through the self-hosted CD pipeline.
+
+The current application improvement is automatic version reporting so the
+running API can report the semantic release version supplied by the release
+pipeline.
 
 
 ## PostgreSQL Application Integration
@@ -1291,9 +1314,423 @@ PostgreSQL persistence verification      PASS
 One follow-up item was identified during validation:
 
 ```text
-GET / currently reports application version 0.1.0
-while the deployed release is v0.4.0.
+At the time of the v0.4.0 deployment validation, GET / reported
+application version 0.1.0 while the deployed release was v0.4.0.
 ```
 
 Application version reporting should be updated in a future change so the API
 reports the actual deployed release/version.
+
+
+
+
+## Python Learning Note — Centralized Application Version Configuration
+
+During the HavenBridge v0.4.0 work, the API version was found to be
+hard-coded in two places inside:
+
+```text
+applications/havenbridge-api/app/main.py
+```
+
+The original code contained:
+
+```python
+app = FastAPI(
+    title=settings.app_name,
+    version="0.1.0",
+)
+```
+
+and the root endpoint returned:
+
+```python
+return {
+    "name": settings.app_name,
+    "environment": settings.app_environment,
+    "version": "0.1.0",
+}
+```
+
+This caused a problem after HavenBridge progressed to release `v0.4.0`.
+
+Although Kubernetes was running the `v0.4.0` release image, the API still
+reported:
+
+```json
+{
+  "version": "0.1.0"
+}
+```
+
+The container version and the version reported by the application had therefore
+drifted apart.
+
+### What Was Changed
+
+A central application-version setting was added to:
+
+```text
+applications/havenbridge-api/app/config.py
+```
+
+using:
+
+```python
+app_version: str = "unreleased"
+```
+
+The two hard-coded values in `main.py` were then changed to use:
+
+```python
+settings.app_version
+```
+
+FastAPI configuration now uses:
+
+```python
+app = FastAPI(
+    title=settings.app_name,
+    version=settings.app_version,
+)
+```
+
+The root endpoint now uses:
+
+```python
+return {
+    "name": settings.app_name,
+    "environment": settings.app_environment,
+    "version": settings.app_version,
+    "documentation": "/docs",
+    "liveness": "/health/live",
+    "readiness": "/health/ready",
+}
+```
+
+### Python Concept: What Is `app_version`?
+
+Inside the `Settings` class:
+
+```python
+app_version: str = "unreleased"
+```
+
+defines a configuration field.
+
+Breaking the line down:
+
+```text
+app_version
+    ↓
+name of the setting
+
+str
+    ↓
+Python type hint
+    ↓
+the value should be a string
+
+"0.4.0"
+    ↓
+default value
+```
+
+Therefore:
+
+```python
+app_version: str = "unreleased"
+```
+
+can be read as:
+
+> Create a setting named `app_version`. Its value should be a string, and use
+> `"0.4.0"` as the default if another value is not supplied.
+
+The application accesses that field through:
+
+```python
+settings.app_version
+```
+
+This can be thought of as:
+
+```text
+settings
+   ↓
+Settings object
+   ↓
+app_version
+   ↓
+"unreleased"
+
+APP_VERSION=0.5.0
+        ↓
+Pydantic BaseSettings
+        ↓
+settings.app_version
+        ↓
+"0.5.0"
+```
+
+### Why `settings.app_version` Is Better Than Repeating `"0.4.0"`
+
+Without centralized configuration:
+
+```text
+main.py
+
+FastAPI metadata → "0.4.0"
+
+GET / response   → "0.4.0"
+
+other code       → possibly another "0.4.0"
+```
+
+Each value would need to be changed independently.
+
+That creates a risk that one location could be forgotten.
+
+With centralized configuration:
+
+```text
+config.py
+
+app_version
+     ↓
+settings.app_version
+     ├── FastAPI metadata
+     └── GET / response
+```
+
+there is one source of application configuration used by multiple parts of the
+program.
+
+This is an example of the principle:
+
+```text
+Define once
+    ↓
+Reuse where needed
+```
+
+### Important: The Version Is Still a Default Value
+### Why the Default Is `unreleased`
+
+The HavenBridge configuration now uses:
+
+```python
+app_version: str = "unreleased"
+```
+
+still contains a default version in the Python configuration.
+
+If HavenBridge later releases:
+
+```text
+v0.5.0
+```
+
+and nothing else changes, the application could still report:
+
+```text
+0.4.0
+```
+
+The next improvement will therefore be to supply the application version from
+the release/deployment environment rather than manually changing the Python
+source for every release.
+
+### Why `BaseSettings` Helps
+
+The HavenBridge `Settings` class inherits from:
+
+```python
+BaseSettings
+```
+
+from Pydantic Settings.
+
+This allows configuration fields to be overridden using environment variables.
+
+For example, the Python field:
+
+```python
+app_version
+```
+
+can receive a value from:
+
+```text
+APP_VERSION
+```
+
+Conceptually:
+
+```text
+APP_VERSION=0.5.0
+        ↓
+Pydantic Settings
+        ↓
+settings.app_version
+        ↓
+"0.5.0"
+```
+
+The Python code using:
+
+```python
+settings.app_version
+```
+
+does not need to change.
+
+For a future major release:
+
+```text
+APP_VERSION=1.0.0
+        ↓
+settings.app_version
+        ↓
+FastAPI
+        ↓
+GET /
+        ↓
+"version": "1.0.0"
+```
+
+### Current Versus Target Design
+
+The original design was:
+
+```text
+main.py
+   ↓
+"0.1.0"
+   ↓
+hard-coded in multiple locations
+```
+
+Problem:
+
+```text
+Release changes
+    ↓
+Python version does not automatically change
+    ↓
+reported version becomes inaccurate
+```
+
+The current design is:
+
+```text
+config.py
+    ↓
+app_version = "0.4.0"
+    ↓
+settings.app_version
+    ├── FastAPI metadata
+    └── GET / response
+```
+
+This centralizes application-version configuration.
+
+The future target design is:
+
+```text
+Git release tag
+v0.5.0
+    ↓
+GitHub Actions:
+GITHUB_REF_NAME=v0.5.0
+    ↓
+Bash parameter expansion:
+${GITHUB_REF_NAME#v}
+    ↓
+0.5.0
+    ↓
+docker build
+--build-arg APP_VERSION=0.5.0
+    ↓
+Dockerfile ARG APP_VERSION
+    ↓
+Dockerfile ENV APP_VERSION
+    ↓
+Pydantic BaseSettings
+    ↓
+settings.app_version
+    ├── FastAPI metadata
+    └── GET / response
+    ↓
+"version": "0.5.0"
+
+Later:
+
+```text
+Git release
+v1.0.0
+    ↓
+APP_VERSION=1.0.0
+    ↓
+same Python application code
+    ↓
+"version": "1.0.0"
+```
+
+The important idea is that future releases should not require editing
+`main.py` merely to change a version number.
+
+### Python Learning Takeaway
+
+This change introduced several useful Python concepts:
+
+```text
+Configuration field
+        ↓
+app_version: str = "unreleased"
+
+Object attribute access
+        ↓
+settings.app_version
+
+Reuse
+        ↓
+one setting used in multiple locations
+
+Environment-driven configuration
+        ↓
+APP_VERSION can override the default
+
+Separation of concerns
+        ↓
+config.py stores configuration
+main.py uses configuration
+```
+
+The key lesson is:
+
+> Application behavior should generally read configuration from a central
+> source instead of repeating hard-coded values throughout the program.
+
+### HavenBridge Follow-Up
+
+Current state:
+
+```text
+Central app_version setting             IMPLEMENTED
+FastAPI uses settings.app_version       IMPLEMENTED
+Root endpoint uses settings.app_version IMPLEMENTED
+Automatic release-version injection     IMPLEMENTED
+```
+
+A future CI/CD improvement will pass the semantic release version into the
+container or Kubernetes environment so releases such as:
+
+```text
+v0.5.0
+v0.6.0
+v1.0.0
+```
+
+can automatically be reported by the running API without editing Python source
+code for each release.

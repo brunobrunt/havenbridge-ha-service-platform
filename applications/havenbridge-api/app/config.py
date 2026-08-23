@@ -31,6 +31,7 @@ class Settings(BaseSettings):
 
     # General API configuration.
     app_name: str = "HavenBridge API"
+    app_version: str = "unreleased"
     app_environment: str = "development"
     app_host: str = "0.0.0.0"
     app_port: int = Field(default=8000, ge=1, le=65535)
