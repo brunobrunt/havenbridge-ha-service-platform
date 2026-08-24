@@ -212,6 +212,57 @@ def list_inquiries(
             detail="Unable to retrieve service inquiries.",
         ) from exc
 
+
+# Define the route that retrieves one inquiry by ID.
+#
+# The complete endpoint becomes:
+#
+#     GET /api/v1/inquiries/{inquiry_id}
+
+
+@router.get(
+    "/{inquiry_id}",
+    response_model=ServiceInquiryResponse,
+    summary="Get a service inquiry",
+)
+def get_inquiry(
+    inquiry_id: int,
+    db: DatabaseSession,
+) -> ServiceInquiry:
+    """
+    Return one service inquiry by its database ID.
+
+    inquiry_id:
+        Identifies the inquiry that should be retrieved.
+
+    db:
+        Contains the managed SQLAlchemy database session.
+    """
+
+    try:
+        # Look up the inquiry using its primary-key ID.
+        inquiry = db.get(ServiceInquiry, inquiry_id)
+
+    except SQLAlchemyError as exc:
+        logger.exception(
+            "Unable to retrieve service inquiry %s.",
+            inquiry_id,
+        )
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to retrieve the service inquiry.",
+        ) from exc
+
+    if inquiry is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Service inquiry not found.",
+        )
+
+    return inquiry
+
+
 # Define the route that updates the workflow status of an inquiry.
 #
 # The complete endpoint becomes:

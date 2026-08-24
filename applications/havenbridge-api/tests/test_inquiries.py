@@ -116,6 +116,50 @@ def test_list_inquiries_returns_stored_records(
     assert response_body[0]["status"] == "new"
 
 
+def test_get_inquiry_returns_requested_record(
+    client: TestClient,
+) -> None:
+    """An existing inquiry should be retrievable by its ID."""
+
+    create_response = client.post(
+        "/api/v1/inquiries",
+        json=VALID_INQUIRY,
+    )
+
+    assert create_response.status_code == 201
+
+    inquiry_id = create_response.json()["id"]
+
+    get_response = client.get(
+        f"/api/v1/inquiries/{inquiry_id}"
+    )
+
+    assert get_response.status_code == 200
+
+    response_body = get_response.json()
+
+    assert response_body["id"] == inquiry_id
+    assert response_body["requester_name"] == "Jordan Demo"
+    assert response_body["requester_email"] == "jordan.demo@example.org"
+    assert response_body["service_category"] == "Respite care"
+    assert response_body["status"] == "new"
+
+
+def test_get_inquiry_returns_404_for_missing_inquiry(
+    client: TestClient,
+) -> None:
+    """A request for a nonexistent inquiry should return 404."""
+
+    get_response = client.get(
+        "/api/v1/inquiries/9999"
+    )
+
+    assert get_response.status_code == 404
+    assert get_response.json() == {
+        "detail": "Service inquiry not found."
+    }
+
+
 def test_update_inquiry_status_from_new_to_reviewing(
     client: TestClient,
 ) -> None:

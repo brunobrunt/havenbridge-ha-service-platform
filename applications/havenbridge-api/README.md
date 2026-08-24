@@ -1323,6 +1323,165 @@ reports the actual deployed release/version.
 
 
 
+## Service Inquiry Lookup by ID
+
+HavenBridge now supports retrieving one service inquiry directly by its
+database ID.
+
+Endpoint:
+
+```text
+GET /api/v1/inquiries/{inquiry_id}
+```
+
+Example:
+
+```text
+GET /api/v1/inquiries/1
+```
+
+The request flow is:
+
+```text
+Client requests inquiry ID
+        ↓
+FastAPI receives inquiry_id
+        ↓
+SQLAlchemy searches ServiceInquiry by primary key
+        ↓
+Record found?
+    ├── Yes → return inquiry with HTTP 200
+    └── No  → return HTTP 404
+```
+
+The route is implemented in:
+
+```text
+applications/havenbridge-api/app/routers/inquiries.py
+```
+
+The database lookup uses:
+
+```python
+inquiry = db.get(ServiceInquiry, inquiry_id)
+```
+
+`ServiceInquiry` tells SQLAlchemy which database model to search.
+
+`inquiry_id` contains the primary-key value requested by the client.
+
+For example:
+
+```text
+GET /api/v1/inquiries/5
+```
+
+results conceptually in:
+
+```text
+Look in service_inquiries
+        ↓
+Find primary key ID 5
+        ↓
+Return that inquiry
+```
+
+If the inquiry does not exist, HavenBridge returns:
+
+```json
+{
+  "detail": "Service inquiry not found."
+}
+```
+
+with:
+
+```text
+HTTP 404 Not Found
+```
+
+### Local Validation
+
+Two automated tests were added in:
+
+```text
+applications/havenbridge-api/tests/test_inquiries.py
+```
+
+The first test validates successful retrieval:
+
+```text
+Create inquiry
+        ↓
+Read generated ID
+        ↓
+GET /api/v1/inquiries/{id}
+        ↓
+HTTP 200
+        ↓
+Correct inquiry returned
+```
+
+The second test validates the missing-record path:
+
+```text
+GET /api/v1/inquiries/9999
+        ↓
+No matching database record
+        ↓
+HTTP 404
+        ↓
+"Service inquiry not found."
+```
+
+Individual validation results:
+
+```text
+test_get_inquiry_returns_requested_record          PASS
+test_get_inquiry_returns_404_for_missing_inquiry   PASS
+```
+
+The complete HavenBridge API test suite was also executed:
+
+```text
+12 passed
+1 dependency deprecation warning
+```
+
+The warning is produced by the current Starlette/httpx test dependency and
+does not represent a failure of the inquiry lookup feature.
+
+### Release Significance
+
+This is a new HavenBridge API capability rather than a documentation,
+infrastructure, or CI/CD-only change.
+
+It therefore qualifies as a semantic-version MINOR change under the current
+HavenBridge release policy:
+
+```text
+feat: → MINOR
+```
+
+With the current release at:
+
+```text
+v0.5.0
+```
+
+the semantic-version automation is expected to calculate:
+
+```text
+v0.6.0
+```
+
+after this feature is committed using a `feat:` conventional commit.
+
+The version is not created manually. The HavenBridge Release workflow will be
+responsible for calculating and creating the release tag during the upcoming
+end-to-end validation.
+
+
 
 ## Python Learning Note — Centralized Application Version Configuration
 
