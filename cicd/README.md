@@ -889,85 +889,335 @@ A concise explanation of the HavenBridge image versioning strategy is:
 
 ## Semantic Version Release Automation
 
-HavenBridge now has a separate GitHub Actions release workflow for intentional
-semantic-version releases.
+HavenBridge uses a separate GitHub Actions Release workflow for intentional
+application releases.
 
 Workflow:
 
 ```text
 .github/workflows/release.yml
-
-
-Annotated Git tag
-        ↓
-Validate vMAJOR.MINOR.PATCH
-        ↓
-Checkout tagged source
-        ↓
-Set up Python 3.12
-        ↓
-Install application dependencies
-        ↓
-Run FastAPI pytest suite
-        ↓
-Build Docker image once
-        ↓
-Validate Kubernetes manifests with Kubeconform
-        ↓
-Authenticate to GHCR
-        ↓
-Tag the same image with:
-    ├── Semantic version
-    └── Git commit SHA
-        ↓
-Push both tags to GHCR
-
-````
-
-For the first self-hosted CD validation, HavenBridge used the semantic
-version:
-
-```text
-v0.3.0
-````
-
-The annotated tag referenced the commit:
-
-```text
-e3bacb4f602b2adfb97356f2b75be8731c23d8c7
 ```
 
-The Release workflow published both:
+Earlier HavenBridge releases used a manual semantic-version process:
 
 ```text
-ghcr.io/brunobrunt/havenbridge-api:v0.3.0
+Human selects semantic version
+        ↓
+Create annotated Git tag
+        ↓
+Push Git tag to GitHub
+        ↓
+HavenBridge Release workflow
 ```
 
-and:
-
-```text
-ghcr.io/brunobrunt/havenbridge-api:e3bacb4f602b2adfb97356f2b75be8731c23d8c7
-```
-
-The semantic-version tag provides a human-readable release identifier,
-while the commit-SHA tag provides exact source-code traceability.
-
-The current release model intentionally uses a manual semantic-version
-gate. A successful CI run does not automatically create a new release.
-An approved commit is explicitly tagged and the tag is pushed to GitHub.
-
-Example:
+For example:
 
 ```bash
-git tag -a v0.3.0 \
-  -m "HavenBridge v0.3.0 - self-hosted continuous deployment"
+git tag -a v0.5.0 \
+  -m "HavenBridge v0.5.0 - automatic application version reporting"
 
-git push origin v0.3.0
+git push origin v0.5.0
 ```
 
-Automated semantic-version selection and automatic Git tag creation are
-planned as a later improvement after the manual release process has been
-fully understood and documented.
+This manual process was useful while the Git tag, Release workflow, GHCR image,
+and CD relationship were being learned and validated.
+
+The release process is now being changed so that semantic-version calculation
+and Git-tag creation are automated.
+
+The Release workflow is started intentionally with:
+
+```yaml
+on:
+  workflow_dispatch:
+```
+
+This keeps a human release-approval point while removing the need to manually
+calculate, create, and push the next semantic version.
+
+The new release flow is:
+
+```text
+Application change committed
+        ↓
+Push to main
+        ↓
+HavenBridge CI
+        ↓
+CI succeeds
+        ↓
+Human starts HavenBridge Release
+        ↓
+Calculate next semantic version
+        ↓
+Run API tests
+        ↓
+Build release image
+        ↓
+Validate Kubernetes manifests
+        ↓
+Push release image to GHCR
+        ↓
+Create annotated Git tag automatically
+        ↓
+Push Git tag automatically
+        ↓
+Release workflow succeeds
+        ↓
+Existing HavenBridge CD workflow
+```
+
+The human decides **when** to release.
+
+The automation determines **what the next application version should be**.
+
+### Semantic Version Calculator
+
+The version-calculation logic is stored separately from the GitHub Actions
+workflow:
+
+```text
+cicd/scripts/next-version.sh
+```
+
+The Release workflow calls it with:
+
+```yaml
+- name: Determine next semantic version
+  id: version
+  run: bash "$GITHUB_WORKSPACE/cicd/scripts/next-version.sh"
+```
+
+The script examines committed Git history after the latest semantic-version
+tag.
+
+Important:
+
+```text
+The script examines COMMITTED Git history only.
+
+It does not inspect uncommitted or unstaged working-directory changes.
+```
+
+The current release rules are:
+
+```text
+feat:   → MINOR
+fix:    → PATCH
+feat!:  → MAJOR
+```
+
+Examples:
+
+```text
+Latest release: v0.5.0
+
+feat: add referral workflow
+        ↓
+Next release: v0.6.0
+```
+
+```text
+Latest release: v0.6.0
+
+fix: correct inquiry validation
+        ↓
+Next release: v0.6.1
+```
+
+Commits such as:
+
+```text
+docs:
+test:
+chore:
+```
+
+do not create an application release by themselves.
+
+### API-Specific Version Calculation
+
+HavenBridge contains application, Kubernetes, Terraform, Ansible, CI/CD, and
+other platform code.
+
+The semantic-version calculator therefore limits release-causing Git history
+to:
+
+```text
+applications/havenbridge-api
+```
+
+This prevents an unrelated infrastructure change such as:
+
+```text
+feat: improve Terraform runner provisioning
+```
+
+from incorrectly increasing the HavenBridge API version.
+
+An application change such as:
+
+```text
+feat: add referral endpoint
+```
+
+remains eligible for a semantic-version increase when it changes files under:
+
+```text
+applications/havenbridge-api
+```
+
+### Full Git History
+
+The Release workflow checks out the complete Git history:
+
+```yaml
+- name: Checkout repository
+  uses: actions/checkout@v7
+  with:
+    fetch-depth: 0
+```
+
+This is required because the version calculator needs access to previous Git
+tags and commits.
+
+Conceptually:
+
+```text
+Latest semantic tag
+        ↓
+Committed API changes after that tag
+        ↓
+Release rule
+        ↓
+Next semantic version
+```
+
+### Calculated Release Values
+
+The version calculator writes values to GitHub Actions `GITHUB_OUTPUT`.
+
+For a minor release, the values could be:
+
+```text
+bump=minor
+tag=v0.6.0
+app_version=0.6.0
+```
+
+The Release workflow can then reuse them as:
+
+```text
+steps.version.outputs.bump
+steps.version.outputs.tag
+steps.version.outputs.app_version
+```
+
+For example, the calculated application version is supplied to the Docker
+build:
+
+```yaml
+APP_VERSION="${{ steps.version.outputs.app_version }}"
+```
+
+while the calculated semantic Git/Docker tag is available as:
+
+```yaml
+${{ steps.version.outputs.tag }}
+```
+
+### Automatic Git Tag Creation
+
+After the release image has passed its tests and validation and has been
+published, GitHub Actions creates the annotated source-code tag:
+
+```bash
+TAG="${{ steps.version.outputs.tag }}"
+
+git config user.name "github-actions[bot]"
+git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+git tag -a "${TAG}" \
+  -m "HavenBridge ${TAG}"
+
+git push origin "${TAG}"
+```
+
+This replaces the previous manual commands:
+
+```text
+git tag -a v0.x.x ...
+git push origin v0.x.x
+```
+
+The Release workflow requires:
+
+```yaml
+permissions:
+  contents: write
+  packages: write
+```
+
+`packages: write` permits GHCR publication.
+
+`contents: write` permits the workflow to push the automatically created Git
+tag back to the repository.
+
+### Git Tag and Container Image Tag
+
+The two tags serve different purposes:
+
+```text
+Git tag
+v0.6.0
+    ↓
+Marks the released source-code commit
+```
+
+```text
+Container image tag
+ghcr.io/brunobrunt/havenbridge-api:v0.6.0
+    ↓
+Identifies the released container image
+```
+
+The release image also retains a commit-SHA tag for exact source-code
+traceability.
+
+### No Release-Causing Commit
+
+If no committed HavenBridge API change matches the release rules, the version
+calculator stops the release:
+
+```text
+No release-causing commit found. Release stopped.
+```
+
+This behavior has been validated locally.
+
+It prevents documentation-only, infrastructure-only, or other non-release
+changes from accidentally creating a new HavenBridge API version.
+
+### Current Validation Status
+
+The automated semantic-version implementation has been prepared locally.
+
+Validated locally:
+
+```text
+Semantic-version script Bash syntax        PASS
+No release-causing commit detection        PASS
+No-release exit behavior                   PASS
+API-specific Git-history filtering         PASS
+```
+
+The first complete GitHub Actions validation of automatic version calculation,
+GHCR publication, automatic Git-tag creation, and Release-to-CD deployment is
+still pending.
+
+The earlier manually created semantic releases remain valid historical
+release evidence.
+
 
 ## Continuous Deployment Implementation
 
@@ -1973,83 +2223,174 @@ kubectl get events \
 
 ## Current Release and Deployment Model
 
-The current model is:
+The current HavenBridge release model keeps a deliberate human approval gate
+while automating semantic-version selection and Git-tag creation.
 
 ```text
 Develop
     ↓
-Commit
+Conventional Commit
     ↓
-Push
+Push to main
     ↓
-CI
+HavenBridge CI
     ↓
-Human approves a release
+CI succeeds
     ↓
-Human selects semantic version
+Human approves release
+by running HavenBridge Release
     ↓
-Annotated Git tag
+next-version.sh examines committed API changes
     ↓
-Push tag
+Semantic version calculated automatically
     ↓
-Release workflow
+Release tests and validation
     ↓
-GHCR
+Release image published to GHCR
     ↓
-CD workflow
+Annotated Git tag created automatically
+    ↓
+Git tag pushed automatically
+    ↓
+Release workflow succeeds
+    ↓
+HavenBridge CD
     ↓
 Self-hosted runner
     ↓
 Kubernetes
 ```
 
-The manual semantic-version Git tag is currently an intentional release
-approval gate.
+The human release decision remains intentional.
 
-## Future Automated Semantic Versioning
-
-A later HavenBridge improvement will automate semantic-version selection
-and release creation.
-
-Structured commit conventions may eventually determine whether a change
-represents:
+The following manual work is no longer required:
 
 ```text
-PATCH
-MINOR
-MAJOR
+Manually calculate v0.x.x
+Manually run git tag -a
+Manually run git push origin <tag>
 ```
 
-The planned evolution is:
+Release automation now performs those operations.
+
+The first complete GitHub Actions end-to-end validation of this automated
+release model is still pending.
+
+## Automated Semantic Versioning Implementation Status
+
+HavenBridge has now implemented automated semantic-version calculation and
+automatic Git-tag creation.
+
+The earlier manual process was:
 
 ```text
-Current:
-
 Human selects release version
         ↓
-Human creates Git tag
+Human creates annotated Git tag
         ↓
-Release + deployment automated
-
-
-Future:
-
-Structured commits
+Human pushes Git tag
         ↓
-Release automation
+Release workflow
         ↓
-Version calculated automatically
-        ↓
-Git tag created automatically
-        ↓
-Release created automatically
-        ↓
-Existing CD pipeline deploys release
+CD deployment
 ```
 
-The manual process is being retained first so that the mechanics of Git
-tags, releases, GHCR images and deployment triggers are fully understood
-before release-version creation is automated.
+The new implementation is:
+
+```text
+Conventional application commit
+        ↓
+HavenBridge CI
+        ↓
+Human starts HavenBridge Release
+        ↓
+next-version.sh examines committed API changes
+        ↓
+Release type determined automatically
+        ↓
+Semantic version calculated automatically
+        ↓
+Release image built and validated
+        ↓
+Semantic-version image pushed to GHCR
+        ↓
+Annotated Git tag created automatically
+        ↓
+Git tag pushed automatically
+        ↓
+Existing CD workflow deploys the release
+```
+
+The current release rules are:
+
+```text
+feat:   → MINOR
+fix:    → PATCH
+feat!:  → MAJOR
+```
+
+For example:
+
+```text
+v0.5.0
+    +
+feat: add referral workflow
+    ↓
+v0.6.0
+```
+
+The version-calculation logic is maintained in:
+
+```text
+cicd/scripts/next-version.sh
+```
+
+The GitHub Actions orchestration is maintained in:
+
+```text
+.github/workflows/release.yml
+```
+
+The human release gate is intentionally retained for now.
+
+This means HavenBridge currently automates:
+
+```text
+Version calculation
+Git tag creation
+Git tag push
+Container-image tagging
+Container-image publication
+Release-to-CD handoff
+```
+
+while a human still decides when the Release workflow should run.
+
+A later enhancement may remove the manual `workflow_dispatch` approval point
+and allow eligible commits to initiate releases automatically after suitable
+branch, pull-request, and release controls are established.
+
+The automated semantic-version implementation is complete locally but has not
+yet completed its first full GitHub Actions end-to-end validation.
+
+That validation will confirm:
+
+```text
+Automatic semantic-version calculation
+        ↓
+Automatic GHCR publication
+        ↓
+Automatic Git-tag creation
+        ↓
+Successful Release workflow
+        ↓
+Automatic HavenBridge CD
+        ↓
+Kubernetes rollout
+        ↓
+Application reports the calculated version
+```
+
 
 ## Related CI/CD Documentation
 
@@ -2086,16 +2427,45 @@ GitHub Actions workflows:
 .github/workflows/cd.yml
 ```
 
+Semantic-version calculator:
+
+```text
+cicd/scripts/next-version.sh
+```
+
+The semantic-version calculator examines committed HavenBridge API changes
+after the latest release tag and determines the next release version using
+the current HavenBridge release rules:
+
+```text
+feat:   → MINOR
+fix:    → PATCH
+feat!:  → MAJOR
+```
+
+The calculated values are passed back to:
+
+```text
+.github/workflows/release.yml
+```
+
+through GitHub Actions `GITHUB_OUTPUT`.
+
+
 ## Current CD Status
 
-The HavenBridge manual Release + self-hosted continuous deployment
-implementation is complete and validated.
+The HavenBridge Release + self-hosted continuous deployment implementation is
+complete and validated.
+
+The existing release and CD architecture has successfully deployed multiple
+semantic-version releases through the self-hosted runner into the Kubernetes
+cluster.
 
 Completed milestones include:
 
 * GitHub-hosted CI validated.
 * GHCR publication validated.
-* Semantic-version Release workflow validated.
+* Semantic-version Release workflow validated using the original manual Git-tag release gate.
 * Dedicated self-hosted CD runner provisioned.
 * GitHub Actions runner registered.
 * Runner systemd service enabled and running.
@@ -2113,3 +2483,67 @@ Completed milestones include:
 * Second end-to-end release `v0.4.0` successfully deployed.
 * Real `PATCH /api/v1/inquiries/{inquiry_id}/status` application change validated through the Gateway.
 * PostgreSQL persistence of the deployed `v0.4.0` status update independently verified.
+* Release `v0.5.0` successfully deployed.
+* Automatic application-version injection validated with the running API reporting `"version": "0.5.0"`.
+
+### Semantic-Version Automation Status
+
+HavenBridge is now extending the validated Release + CD architecture with
+automatic semantic-version calculation and automatic Git-tag creation.
+
+Current implementation status:
+
+```text
+Semantic-version calculator             Implemented
+API-specific Git-history filtering       Implemented
+Conventional-commit release rules        Implemented
+Automatic version calculation            Locally validated
+No-release detection                     Locally validated
+Automatic Git-tag creation               Implemented in Release workflow
+Automatic Git-tag push                   Implemented in Release workflow
+Human workflow_dispatch release gate     Retained intentionally
+Full GitHub Actions validation            Pending
+Automatic Release-to-CD validation       Pending
+```
+
+The new implementation therefore does not replace the already validated CD
+pipeline.
+
+Instead, it replaces the manual version-selection and Git-tag creation steps
+that previously occurred before the Release workflow.
+
+Previous release entry:
+
+```text
+Human chooses v0.x.x
+        ↓
+git tag -a v0.x.x
+        ↓
+git push origin v0.x.x
+        ↓
+Release
+        ↓
+CD
+```
+
+New release entry:
+
+```text
+Human starts HavenBridge Release
+        ↓
+next-version.sh
+        ↓
+Version calculated automatically
+        ↓
+Release validation and GHCR publication
+        ↓
+Git tag created and pushed automatically
+        ↓
+Existing HavenBridge CD
+```
+
+The Release + CD pipeline remains validated.
+
+The new automated semantic-version entry process is implemented but will not
+be marked fully validated until its first successful end-to-end GitHub Actions
+release and Kubernetes deployment.

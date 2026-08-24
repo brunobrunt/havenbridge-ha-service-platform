@@ -1,12 +1,15 @@
 name: HavenBridge Release
 
 on:
-  push:
-    tags:
-      - 'v*.*.*'
+  workflow_dispatch:
+#on:
+#  push:
+#    tags:
+#      - 'v*.*.*'
 
 permissions:
-  contents: read
+  #contents: read
+  contents: write
   packages: write
 
 
@@ -21,19 +24,11 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
-
-      - name: Show release tag
-        run: echo "HavenBridge release tag is ${GITHUB_REF_NAME}"
-
-      - name: Validate semantic version tag
-        run: |
-          if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Invalid release tag: ${GITHUB_REF_NAME}"
-            echo "Expected format: vMAJOR.MINOR.PATCH, for example v0.2.0"
-            exit 1
-          fi
-
-          echo "Valid semantic version tag: ${GITHUB_REF_NAME}"
+        with:
+          fetch-depth: 0
+      - name: Determine next semantic version
+        id: version
+        run: bash "$GITHUB_WORKSPACE/cicd/scripts/next-version.sh"
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v6
@@ -50,7 +45,7 @@ jobs:
 
       - name: Build HavenBridge API Docker image
         run: |
-          APP_VERSION="${GITHUB_REF_NAME#v}"
+          APP_VERSION="${{ steps.version.outputs.app_version }}"
 
           echo "Building HavenBridge API version ${APP_VERSION}"
 
@@ -93,7 +88,7 @@ jobs:
         run: |
           docker tag \
             havenbridge-api:release \
-            ghcr.io/brunobrunt/havenbridge-api:${GITHUB_REF_NAME}
+            ghcr.io/brunobrunt/havenbridge-api:${{ steps.version.outputs.tag }}
 
           docker tag \
             havenbridge-api:release \
@@ -102,7 +97,19 @@ jobs:
       - name: Push HavenBridge API release images
         run: |
           docker push \
-            ghcr.io/brunobrunt/havenbridge-api:${GITHUB_REF_NAME}
+            ghcr.io/brunobrunt/havenbridge-api:${{ steps.version.outputs.tag }}
 
           docker push \
             ghcr.io/brunobrunt/havenbridge-api:${GITHUB_SHA}
+
+      - name: Create and push Git release tag
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git tag -a "${TAG}" \
+            -m "HavenBridge ${TAG}"
+
+          git push origin "${TAG}"
