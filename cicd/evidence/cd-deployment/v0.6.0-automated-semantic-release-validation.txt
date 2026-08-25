@@ -1,0 +1,386 @@
+HavenBridge v0.6.0 Automated Semantic Release Validation
+========================================================
+
+Purpose
+-------
+
+Validate the first successful HavenBridge release in which the semantic
+version and annotated Git release tag were created automatically by the
+GitHub Actions Release workflow.
+
+This validation also confirms that the existing self-hosted CD workflow
+successfully deployed the automatically released application into the
+HavenBridge Kubernetes cluster.
+
+
+Release Feature
+---------------
+
+Application change:
+
+    GET /api/v1/inquiries/{inquiry_id}
+
+Purpose:
+
+    Retrieve one HavenBridge service inquiry directly by its database ID.
+
+Commit:
+
+    9df2c05d4c18ccb97ebb8ee0b039fcad16e90ad6
+
+Commit message:
+
+    feat: add service inquiry lookup endpoint
+
+Because the commit used the conventional commit prefix:
+
+    feat:
+
+the HavenBridge semantic-version policy classified the change as a MINOR
+release.
+
+
+Semantic-Version Calculation
+----------------------------
+
+Previous release:
+
+    v0.5.0
+
+Release type:
+
+    minor
+
+Automatically calculated next release:
+
+    v0.6.0
+
+GitHub Actions Release workflow output:
+
+    Latest release: v0.5.0
+    Release type:  minor
+    Next release:  v0.6.0
+
+Calculated workflow values:
+
+    bump=minor
+    tag=v0.6.0
+    app_version=0.6.0
+
+Result:
+
+    PASS
+
+
+Automatic Git Tag Creation
+--------------------------
+
+The v0.6.0 Git tag was NOT created manually.
+
+GitHub Actions created and pushed the annotated tag automatically.
+
+Verification:
+
+    git fetch --tags
+    git tag --sort=-version:refname | head -5
+
+Result:
+
+    v0.6.0
+    v0.5.0
+    v0.4.0
+    v0.3.0
+    v0.2.0
+
+Tag verification:
+
+    git show v0.6.0 --no-patch
+
+Result:
+
+    tag v0.6.0
+
+    Tagger:
+    github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+
+    Tag message:
+    HavenBridge v0.6.0
+
+    Commit:
+    9df2c05d4c18ccb97ebb8ee0b039fcad16e90ad6
+
+    Commit message:
+    feat: add service inquiry lookup endpoint
+
+Result:
+
+    PASS
+
+
+GHCR Release Image Validation
+-----------------------------
+
+The HavenBridge Release workflow published the semantic release image:
+
+    ghcr.io/brunobrunt/havenbridge-api:v0.6.0
+
+The same release was also associated with the exact Git commit SHA:
+
+    9df2c05d4c18ccb97ebb8ee0b039fcad16e90ad6
+
+This provides:
+
+    Semantic version -> human-readable release identity
+    Commit SHA       -> exact source-code traceability
+
+Result:
+
+    PASS
+
+
+Negative Release Guard Validation
+---------------------------------
+
+Before the v0.6.0 application feature was committed, the Release workflow
+was manually started against a CI/CD-only commit.
+
+The semantic-version calculator returned:
+
+    No release-causing commit found. Release stopped.
+
+The Release workflow exited before:
+
+    application release image publication
+    semantic Git tag creation
+    Kubernetes deployment
+
+The downstream HavenBridge CD workflow was triggered by workflow_run, but
+its deployment job was skipped because the Release workflow had not
+completed successfully.
+
+Verification also confirmed that the latest Git tag remained:
+
+    v0.5.0
+
+and no accidental:
+
+    v0.6.0
+
+tag had been created.
+
+Result:
+
+    PASS
+
+
+HavenBridge CD Validation
+-------------------------
+
+The successful v0.6.0 Release workflow triggered the existing HavenBridge CD
+workflow.
+
+HavenBridge CD run:
+
+    HavenBridge CD #5
+
+Result:
+
+    SUCCESS
+
+The CD workflow used the dedicated self-hosted HavenBridge runner and the
+restricted havenbridge-deployer Kubernetes identity.
+
+
+Kubernetes Deployment Image Validation
+--------------------------------------
+
+Command:
+
+    kubectl -n havenbridge get deployment havenbridge-api \
+      -o=jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
+
+Result:
+
+    ghcr.io/brunobrunt/havenbridge-api:9df2c05d4c18ccb97ebb8ee0b039fcad16e90ad6
+
+This confirms that Kubernetes deployed the exact commit associated with
+the automated v0.6.0 release.
+
+Result:
+
+    PASS
+
+
+Running Application Version Validation
+--------------------------------------
+
+Command:
+
+    curl -ks https://havenbridge.lab/ | python3 -m json.tool
+
+Result:
+
+    {
+        "name": "HavenBridge API",
+        "environment": "production",
+        "version": "0.6.0",
+        "documentation": "/docs",
+        "liveness": "/health/live",
+        "readiness": "/health/ready"
+    }
+
+This confirms that the semantic version calculated by the Release workflow
+was passed into the release image and is reported by the running
+application.
+
+Result:
+
+    PASS
+
+
+Released Feature Validation
+---------------------------
+
+Command:
+
+    curl -ks \
+      https://havenbridge.lab/api/v1/inquiries/1 \
+      | python3 -m json.tool
+
+Result:
+
+    {
+        "id": 1,
+        "requester_name": "Version 0.4 Test",
+        "requester_email": "v0.4.test@example.org",
+        "service_category": "Release validation",
+        "message": "Synthetic inquiry created to validate the HavenBridge v0.4.0 status update feature.",
+        "status": "closed",
+        "created_at": "2026-08-19T22:43:54.626388Z",
+        "updated_at": "2026-08-21T16:14:48.550344Z"
+    }
+
+The returned record was created during an earlier HavenBridge validation.
+The purpose of this test was to prove that the newly released v0.6.0
+GET-by-ID endpoint could retrieve an existing PostgreSQL record through the
+production Gateway path.
+
+Result:
+
+    PASS
+
+
+End-to-End Release Flow
+-----------------------
+
+Validated flow:
+
+    feat: application commit
+            |
+            v
+    HavenBridge CI
+            |
+            v
+    Human starts HavenBridge Release
+            |
+            v
+    next-version.sh
+            |
+            v
+    v0.5.0 -> MINOR -> v0.6.0
+            |
+            v
+    API tests
+            |
+            v
+    Release Docker build
+    APP_VERSION=0.6.0
+            |
+            v
+    Kubernetes manifest validation
+            |
+            v
+    GHCR publication
+            |
+            v
+    Automatic annotated Git tag
+    v0.6.0
+            |
+            v
+    HavenBridge Release succeeds
+            |
+            v
+    HavenBridge CD
+            |
+            v
+    Self-hosted CD runner
+            |
+            v
+    Kubernetes Deployment
+            |
+            v
+    Exact SHA deployed
+            |
+            v
+    Running API reports 0.6.0
+            |
+            v
+    GET inquiry-by-ID feature validated
+
+
+Final Validation Status
+-----------------------
+
+Automatic semantic-version calculation:
+
+    PASS
+
+Conventional commit MINOR detection:
+
+    PASS
+
+API-specific release filtering:
+
+    PASS
+
+No-release negative guard:
+
+    PASS
+
+Automatic GHCR semantic release publication:
+
+    PASS
+
+Automatic annotated Git tag creation:
+
+    PASS
+
+Automatic Git tag push:
+
+    PASS
+
+Release-to-CD workflow chaining:
+
+    PASS
+
+Self-hosted Kubernetes deployment:
+
+    PASS
+
+Exact commit-SHA deployment:
+
+    PASS
+
+Running application version reporting:
+
+    PASS
+
+Released GET-by-ID API feature:
+
+    PASS
+
+
+FINAL RESULT:
+
+    HAVENBRIDGE AUTOMATED SEMANTIC RELEASE v0.6.0
+    END-TO-END VALIDATION PASSED

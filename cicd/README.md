@@ -1198,25 +1198,95 @@ This behavior has been validated locally.
 It prevents documentation-only, infrastructure-only, or other non-release
 changes from accidentally creating a new HavenBridge API version.
 
+
 ### Current Validation Status
 
-The automated semantic-version implementation has been prepared locally.
+The HavenBridge automated semantic-version release implementation has now
+completed its first full end-to-end validation.
 
-Validated locally:
+The first automated semantic release was:
 
 ```text
-Semantic-version script Bash syntax        PASS
-No release-causing commit detection        PASS
-No-release exit behavior                   PASS
-API-specific Git-history filtering         PASS
+v0.6.0
 ```
 
-The first complete GitHub Actions validation of automatic version calculation,
-GHCR publication, automatic Git-tag creation, and Release-to-CD deployment is
-still pending.
+Application commit:
 
-The earlier manually created semantic releases remain valid historical
-release evidence.
+```text
+9df2c05d4c18ccb97ebb8ee0b039fcad16e90ad6
+```
+
+Commit message:
+
+```text
+feat: add service inquiry lookup endpoint
+```
+
+The semantic-version calculator evaluated the committed application change and
+produced:
+
+```text
+Latest release: v0.5.0
+Release type:  minor
+Next release:  v0.6.0
+```
+
+The complete validation results were:
+
+```text
+Semantic-version script Bash syntax          PASS
+API-specific Git-history filtering           PASS
+No-release negative guard                    PASS
+Automatic MINOR version calculation          PASS
+Automatic v0.6.0 calculation                 PASS
+GHCR v0.6.0 publication                      PASS
+Automatic annotated Git-tag creation         PASS
+Automatic Git-tag push                       PASS
+Release-to-CD workflow chaining              PASS
+Self-hosted CD runner deployment              PASS
+Exact commit-SHA Kubernetes deployment        PASS
+Running API reports version 0.6.0             PASS
+GET inquiry-by-ID feature validation          PASS
+```
+
+The automatically created Git tag was verified with:
+
+```text
+Tag:     v0.6.0
+Tagger:  github-actions[bot]
+Commit:  9df2c05d4c18ccb97ebb8ee0b039fcad16e90ad6
+```
+
+Kubernetes deployed:
+
+```text
+ghcr.io/brunobrunt/havenbridge-api:9df2c05d4c18ccb97ebb8ee0b039fcad16e90ad6
+```
+
+The running application reported:
+
+```text
+"version": "0.6.0"
+```
+
+The released application feature was also successfully validated through the
+HavenBridge Gateway:
+
+```text
+GET /api/v1/inquiries/1
+```
+
+returned an existing persisted PostgreSQL service inquiry.
+
+The complete validation evidence is stored at:
+
+```text
+cicd/evidence/cd-deployment/v0.6.0-automated-semantic-release-validation.txt
+```
+
+The earlier manually created semantic releases remain valid historical release
+evidence, while `v0.6.0` represents the first successfully validated
+automatically calculated and automatically tagged HavenBridge release.
 
 
 ## Continuous Deployment Implementation
@@ -2370,25 +2440,92 @@ A later enhancement may remove the manual `workflow_dispatch` approval point
 and allow eligible commits to initiate releases automatically after suitable
 branch, pull-request, and release controls are established.
 
-The automated semantic-version implementation is complete locally but has not
-yet completed its first full GitHub Actions end-to-end validation.
+The automated semantic-version implementation has now completed its first full
+GitHub Actions end-to-end validation.
 
-That validation will confirm:
+The validated release was:
 
 ```text
-Automatic semantic-version calculation
+v0.6.0
+```
+
+It was produced from the application commit:
+
+```text
+9df2c05d4c18ccb97ebb8ee0b039fcad16e90ad6
+
+feat: add service inquiry lookup endpoint
+```
+
+The Release workflow automatically determined:
+
+```text
+Latest release: v0.5.0
+Release type:  minor
+Next release:  v0.6.0
+```
+
+GitHub Actions then successfully:
+
+```text
+Calculated v0.6.0 automatically
         ↓
-Automatic GHCR publication
+Built the release image with APP_VERSION=0.6.0
         ↓
-Automatic Git-tag creation
+Published the release image to GHCR
         ↓
-Successful Release workflow
+Created annotated Git tag v0.6.0
         ↓
-Automatic HavenBridge CD
+Pushed v0.6.0 automatically
         ↓
-Kubernetes rollout
+Completed HavenBridge Release
         ↓
-Application reports the calculated version
+Triggered HavenBridge CD
+        ↓
+Deployed the exact commit SHA to Kubernetes
+        ↓
+Running application reported version 0.6.0
+```
+
+The automatically created Git tag was verified as:
+
+```text
+Tag:     v0.6.0
+Tagger:  github-actions[bot]
+Commit:  9df2c05d4c18ccb97ebb8ee0b039fcad16e90ad6
+```
+
+The Kubernetes Deployment was verified to use:
+
+```text
+ghcr.io/brunobrunt/havenbridge-api:9df2c05d4c18ccb97ebb8ee0b039fcad16e90ad6
+```
+
+The running HavenBridge API reported:
+
+```text
+"version": "0.6.0"
+```
+
+The released feature was also validated successfully through:
+
+```text
+GET /api/v1/inquiries/{inquiry_id}
+```
+
+The complete evidence is stored at:
+
+```text
+cicd/evidence/cd-deployment/v0.6.0-automated-semantic-release-validation.txt
+```
+
+The automated semantic-version release implementation is therefore:
+
+```text
+IMPLEMENTED    PASS
+VALIDATED      PASS
+RELEASE → CD   PASS
+KUBERNETES     PASS
 ```
 
 
@@ -2417,6 +2554,8 @@ CD deployment evidence:
 ```text
 cicd/evidence/cd-deployment/v0.3.0-deployment-validation.txt
 cicd/evidence/cd-deployment/v0.4.0-deployment-validation.txt
+cicd/evidence/cd-deployment/v0.5.0-version-reporting-validation.txt
+cicd/evidence/cd-deployment/v0.6.0-automated-semantic-release-validation.txt
 ```
 
 GitHub Actions workflows:
@@ -2457,7 +2596,7 @@ through GitHub Actions `GITHUB_OUTPUT`.
 The HavenBridge Release + self-hosted continuous deployment implementation is
 complete and validated.
 
-The existing release and CD architecture has successfully deployed multiple
+The release and CD architecture has successfully deployed multiple
 semantic-version releases through the self-hosted runner into the Kubernetes
 cluster.
 
@@ -2465,7 +2604,7 @@ Completed milestones include:
 
 * GitHub-hosted CI validated.
 * GHCR publication validated.
-* Semantic-version Release workflow validated using the original manual Git-tag release gate.
+* Original manual Git-tag Release workflow validated.
 * Dedicated self-hosted CD runner provisioned.
 * GitHub Actions runner registered.
 * Runner systemd service enabled and running.
@@ -2479,71 +2618,157 @@ Completed milestones include:
 * Commit-SHA image deployment validated.
 * Kubernetes rollout validation passed.
 * Exact deployed-image verification passed.
-* First end-to-end release `v0.3.0` successfully deployed.
-* Second end-to-end release `v0.4.0` successfully deployed.
-* Real `PATCH /api/v1/inquiries/{inquiry_id}/status` application change validated through the Gateway.
+* Release `v0.3.0` successfully deployed.
+* Release `v0.4.0` successfully deployed.
+* `PATCH /api/v1/inquiries/{inquiry_id}/status` validated through the Gateway.
 * PostgreSQL persistence of the deployed `v0.4.0` status update independently verified.
 * Release `v0.5.0` successfully deployed.
 * Automatic application-version injection validated with the running API reporting `"version": "0.5.0"`.
+* Release `v0.6.0` successfully calculated, created, published, and deployed automatically.
+* Automatic Git tag `v0.6.0` created by `github-actions[bot]`.
+* Running Kubernetes application validated reporting `"version": "0.6.0"`.
+* `GET /api/v1/inquiries/{inquiry_id}` successfully validated through the HavenBridge Gateway.
 
 ### Semantic-Version Automation Status
 
-HavenBridge is now extending the validated Release + CD architecture with
-automatic semantic-version calculation and automatic Git-tag creation.
+HavenBridge automated semantic-version calculation and automatic Git-tag
+creation are now implemented and validated end-to-end.
 
-Current implementation status:
+Current validation status:
 
 ```text
-Semantic-version calculator             Implemented
-API-specific Git-history filtering       Implemented
-Conventional-commit release rules        Implemented
-Automatic version calculation            Locally validated
-No-release detection                     Locally validated
-Automatic Git-tag creation               Implemented in Release workflow
-Automatic Git-tag push                   Implemented in Release workflow
-Human workflow_dispatch release gate     Retained intentionally
-Full GitHub Actions validation            Pending
-Automatic Release-to-CD validation       Pending
+Semantic-version calculator              PASS
+API-specific Git-history filtering        PASS
+Conventional-commit release rules         PASS
+No-release negative guard                 PASS
+Automatic version calculation             PASS
+Automatic MINOR release calculation       PASS
+Automatic Git-tag creation                PASS
+Automatic Git-tag push                    PASS
+GHCR semantic-version publication         PASS
+Human workflow_dispatch release gate      RETAINED INTENTIONALLY
+Release-to-CD workflow chaining           PASS
+Self-hosted CD deployment                 PASS
+Exact commit-SHA Kubernetes deployment    PASS
+Running application version reporting     PASS
+Released API feature validation           PASS
 ```
 
-The new implementation therefore does not replace the already validated CD
-pipeline.
+The negative release-path test also proved that CI/CD-only changes do not
+create a new HavenBridge API release.
 
-Instead, it replaces the manual version-selection and Git-tag creation steps
-that previously occurred before the Release workflow.
-
-Previous release entry:
+When no release-causing application commit exists:
 
 ```text
-Human chooses v0.x.x
+HavenBridge Release
         ↓
-git tag -a v0.x.x
+next-version.sh
         ↓
-git push origin v0.x.x
+No release-causing commit found
         ↓
-Release
+Release stops
         ↓
-CD
+No semantic Git tag
+        ↓
+No application deployment
 ```
 
-New release entry:
+The first successful automated semantic release was:
 
 ```text
+v0.6.0
+```
+
+The release was produced from a conventional application commit using:
+
+```text
+feat:
+```
+
+which the HavenBridge release policy correctly interpreted as:
+
+```text
+MINOR
+```
+
+The validated release flow is now:
+
+```text
+Application development
+        ↓
+Conventional commit
+        ↓
+Push to main
+        ↓
+HavenBridge CI
+        ↓
 Human starts HavenBridge Release
         ↓
 next-version.sh
         ↓
-Version calculated automatically
+Semantic version calculated automatically
         ↓
-Release validation and GHCR publication
+Application tests
         ↓
-Git tag created and pushed automatically
+Release Docker build
         ↓
-Existing HavenBridge CD
+Kubernetes manifest validation
+        ↓
+GHCR publication
+        ↓
+Annotated Git tag created automatically
+        ↓
+Git tag pushed automatically
+        ↓
+HavenBridge Release succeeds
+        ↓
+HavenBridge CD
+        ↓
+Self-hosted runner
+        ↓
+Restricted Kubernetes deployer identity
+        ↓
+Exact commit-SHA deployment
+        ↓
+Kubernetes rollout
+        ↓
+Running HavenBridge application
 ```
 
-The Release + CD pipeline remains validated.
+The manual commands previously required for release creation are no longer
+part of the normal HavenBridge release process:
 
-The new automated semantic-version entry process is implemented but will not
-be marked fully validated until its first successful end-to-end GitHub Actions
-release and Kubernetes deployment.
+```text
+git tag -a v0.x.x ...
+git push origin v0.x.x
+```
+
+The human release approval point is intentionally retained through:
+
+```yaml
+workflow_dispatch:
+```
+
+This means a human still decides **when** HavenBridge should release, while the
+release automation determines **what version** should be created.
+
+Validation evidence is stored in:
+
+```text
+cicd/evidence/cd-deployment/v0.3.0-deployment-validation.txt
+cicd/evidence/cd-deployment/v0.4.0-deployment-validation.txt
+cicd/evidence/cd-deployment/v0.5.0-version-reporting-validation.txt
+cicd/evidence/cd-deployment/v0.6.0-automated-semantic-release-validation.txt
+```
+
+The automated semantic-version release phase is therefore considered:
+
+```text
+IMPLEMENTED       PASS
+NEGATIVE PATH     PASS
+POSITIVE PATH     PASS
+RELEASE           PASS
+CD                PASS
+KUBERNETES        PASS
+APPLICATION       PASS
+```

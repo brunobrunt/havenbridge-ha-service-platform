@@ -1,0 +1,317 @@
+HavenBridge v0.5.0 Application Version Reporting Validation
+============================================================
+
+Purpose
+-------
+
+Validate that the HavenBridge application version is supplied automatically
+during the release Docker build and reported correctly by the running
+application after deployment to Kubernetes.
+
+Release
+-------
+
+Semantic version:
+
+    v0.5.0
+
+Release commit:
+
+    5db454410b94f710909d805c12c257da74e87c75
+
+Short commit:
+
+    5db4544
+
+Commit message:
+
+    feat: automate HavenBridge application version reporting
+
+The v0.5.0 release introduced automatic application-version reporting so that
+the running HavenBridge API no longer depends on a hard-coded application
+version.
+
+
+Application Configuration
+-------------------------
+
+HavenBridge application configuration includes:
+
+    app_version: str = "unreleased"
+
+The value:
+
+    unreleased
+
+is used as the safe default when no release version is supplied.
+
+During an official release, GitHub Actions overrides this value with the
+semantic application version.
+
+
+Docker Build-Time Version Injection
+-----------------------------------
+
+The HavenBridge API Dockerfile accepts the application version using:
+
+    ARG APP_VERSION="unreleased"
+
+and makes it available to the running container using:
+
+    ENV APP_VERSION="${APP_VERSION}"
+
+The Release workflow converts the Git release version into the application
+version and supplies it to the Docker build.
+
+For release:
+
+    v0.5.0
+
+the application version becomes:
+
+    0.5.0
+
+Release build concept:
+
+    Git release version
+        v0.5.0
+            |
+            v
+    APP_VERSION
+        0.5.0
+            |
+            v
+    Docker build argument
+            |
+            v
+    Docker environment
+            |
+            v
+    Pydantic Settings
+            |
+            v
+    settings.app_version
+
+
+FastAPI Version Integration
+---------------------------
+
+The HavenBridge API reads the configured application version through:
+
+    settings.app_version
+
+The value is used by:
+
+    FastAPI application metadata
+
+and:
+
+    GET /
+
+This means the running application can identify its deployed software
+version without maintaining a separate hard-coded version value in the
+application source.
+
+
+Local Version Validation
+------------------------
+
+The application configuration was tested without a release version.
+
+Result:
+
+    FastAPI version: unreleased
+    Root endpoint version: unreleased
+
+Result:
+
+    PASS
+
+The configuration was then tested with:
+
+    APP_VERSION=0.5.0
+
+Result:
+
+    FastAPI version: 0.5.0
+    Root endpoint version: 0.5.0
+
+Result:
+
+    PASS
+
+
+Docker Version Validation
+-------------------------
+
+A Docker image was built using:
+
+    --build-arg APP_VERSION=0.5.0
+
+The application configuration inside the image reported:
+
+    0.5.0
+
+Result:
+
+    PASS
+
+
+Release Workflow Validation
+---------------------------
+
+The HavenBridge Release workflow successfully processed:
+
+    v0.5.0
+
+The release build supplied:
+
+    APP_VERSION=0.5.0
+
+to the HavenBridge API Docker image.
+
+The Release workflow completed successfully.
+
+Result:
+
+    PASS
+
+
+Continuous Deployment Validation
+--------------------------------
+
+The successful v0.5.0 Release workflow triggered the existing HavenBridge CD
+workflow.
+
+The CD workflow completed successfully and deployed the released application
+into the HavenBridge Kubernetes cluster.
+
+Result:
+
+    PASS
+
+
+Running Application Validation
+------------------------------
+
+The deployed HavenBridge API was queried through the application Gateway.
+
+Command:
+
+    curl -ks https://havenbridge.lab/
+
+Result:
+
+    {
+        "name": "HavenBridge API",
+        "environment": "production",
+        "version": "0.5.0",
+        "documentation": "/docs",
+        "liveness": "/health/live",
+        "readiness": "/health/ready"
+    }
+
+The important value was:
+
+    "version": "0.5.0"
+
+This confirms that the semantic release version supplied during the Docker
+build reached the running application in Kubernetes.
+
+Result:
+
+    PASS
+
+
+Version Flow Validation
+-----------------------
+
+The validated v0.5.0 flow was:
+
+    Git tag
+    v0.5.0
+        |
+        v
+    HavenBridge Release workflow
+        |
+        v
+    APP_VERSION=0.5.0
+        |
+        v
+    Docker build argument
+        |
+        v
+    Docker ENV
+        |
+        v
+    Pydantic Settings
+        |
+        v
+    settings.app_version
+        |
+        v
+    FastAPI
+        |
+        v
+    Kubernetes deployment
+        |
+        v
+    GET /
+        |
+        v
+    "version": "0.5.0"
+
+
+Significance
+------------
+
+Before v0.5.0, HavenBridge application-version reporting relied on a static
+application value.
+
+The v0.5.0 release proved that application version information could instead
+be supplied automatically by the release process.
+
+This established the version-reporting foundation later used by the automated
+semantic-release implementation validated with v0.6.0.
+
+
+Final Validation Status
+-----------------------
+
+Application version configuration:
+
+    PASS
+
+Default "unreleased" behavior:
+
+    PASS
+
+APP_VERSION environment override:
+
+    PASS
+
+Docker build-time version injection:
+
+    PASS
+
+FastAPI version integration:
+
+    PASS
+
+Release workflow:
+
+    PASS
+
+Continuous deployment:
+
+    PASS
+
+Running Kubernetes application reports 0.5.0:
+
+    PASS
+
+
+FINAL RESULT:
+
+    HAVENBRIDGE v0.5.0 APPLICATION VERSION REPORTING
+    VALIDATION PASSED
