@@ -1,0 +1,191 @@
+HavenBridge Observability Pre-Installation Cluster Baseline
+============================================================
+
+Purpose
+-------
+
+Record the state and available capacity of the HavenBridge Kubernetes cluster
+before Prometheus, Grafana, Loki, or Grafana Alloy are installed.
+
+This provides a known-good baseline that can be compared against the cluster
+after observability components are introduced.
+
+
+Kubernetes Version
+------------------
+
+v1.36.2
+
+
+Node Health
+-----------
+
+Command:
+
+    kubectl get nodes -o wide
+
+Result:
+
+    NAME           STATUS   ROLES           VERSION   INTERNAL-IP
+    eph-cp01       Ready    control-plane   v1.36.2   172.16.10.31
+    eph-cp02       Ready    control-plane   v1.36.2   172.16.10.32
+    eph-cp03       Ready    control-plane   v1.36.2   172.16.10.33
+    eph-worker01   Ready    worker          v1.36.2   172.16.10.34
+    eph-worker02   Ready    worker          v1.36.2   172.16.10.35
+
+Validation:
+
+    5/5 nodes Ready
+
+Result:
+
+    PASS
+
+
+Existing HavenBridge Workloads
+------------------------------
+
+The existing HavenBridge application workloads were running before the
+observability installation.
+
+HavenBridge API:
+
+    havenbridge-api
+    2 replicas Running
+
+PostgreSQL:
+
+    havenbridge-postgres-0
+    1/1 Running
+
+Other validated platform components included:
+
+    Calico
+    cert-manager
+    CoreDNS
+    NFS CSI
+    kube-vip
+    MetalLB
+    Traefik
+    Kubernetes control-plane components
+
+Result:
+
+    PASS
+
+
+Helm Baseline
+-------------
+
+Administrative host:
+
+    eph-cp01
+
+Command:
+
+    helm version
+
+Result:
+
+    Helm version: v4.2.3
+    Kubernetes client version: v1.36
+
+Result:
+
+    PASS
+
+
+Cluster Resource Capacity
+-------------------------
+
+Command:
+
+    kubectl get nodes \
+      -o custom-columns='NAME:.metadata.name,CPU:.status.capacity.cpu,MEMORY:.status.capacity.memory'
+
+Result:
+
+    NAME           CPU   MEMORY
+    eph-cp01       2     3916Mi
+    eph-cp02       2     3916Mi
+    eph-cp03       2     4009988Ki
+    eph-worker01   2     7942Mi
+    eph-worker02   2     7942Mi
+
+Approximate total capacity:
+
+    CPU:     10 vCPU
+    Memory:  ~27 GiB
+
+Approximate worker capacity:
+
+    CPU:     4 vCPU
+    Memory:  ~16 GiB
+
+Result:
+
+    PASS
+
+
+Monitoring Namespace Preflight
+------------------------------
+
+Command:
+
+    kubectl get namespace monitoring observability 2>/dev/null || true
+
+Result:
+
+    No existing monitoring namespace
+    No existing observability namespace
+
+This confirms there is no previous monitoring installation with which the new
+HavenBridge observability stack could collide.
+
+Result:
+
+    PASS
+
+
+Repository Baseline
+-------------------
+
+Repository host:
+
+    syrus
+
+Repository:
+
+    /home/alabi/projects/havenbridge-ha-service-platform
+
+Command:
+
+    git status -sb
+
+Result:
+
+    ## main...origin/main
+
+The observability implementation began from the current main branch.
+
+Result:
+
+    PASS
+
+
+Final Baseline Status
+---------------------
+
+Kubernetes nodes:               PASS
+HavenBridge workloads:          PASS
+Platform workloads:             PASS
+Helm availability:              PASS
+Resource preflight:             PASS
+Namespace preflight:            PASS
+Repository baseline:            PASS
+
+
+FINAL RESULT:
+
+    HAVENBRIDGE OBSERVABILITY PRE-INSTALLATION BASELINE
+    VALIDATION PASSED
