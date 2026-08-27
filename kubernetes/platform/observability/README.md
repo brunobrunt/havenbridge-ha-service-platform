@@ -1386,3 +1386,14 @@ No Prometheus or Grafana workloads have been installed yet.
 
 The next cluster change will occur only after the Helm chart and HavenBridge
 configuration have been reviewed.
+
+
+## Observability Namespace
+
+Before beginning the observability installation, the cluster was checked for
+existing monitoring namespaces.
+
+Command:
+
+```bash
+kubectl get namespace monitoring observability 2>/dev/null || true

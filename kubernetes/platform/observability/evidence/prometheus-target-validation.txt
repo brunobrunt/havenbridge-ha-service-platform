@@ -1,0 +1,707 @@
+HavenBridge Prometheus Installation and Target Validation
+=========================================================
+
+Purpose
+-------
+
+Record the installation, validation, troubleshooting, and final target health
+of the HavenBridge Prometheus monitoring stack.
+
+Monitoring stack:
+
+    Helm chart: kube-prometheus-stack
+    Chart version: 88.5.4
+    Helm release: havenbridge-monitoring
+    Namespace: observability
+
+
+Helm Release Validation
+-----------------------
+
+Command:
+
+    helm status havenbridge-monitoring -n observability
+
+Validated result:
+
+    STATUS: deployed
+    REVISION: 1
+    DESCRIPTION: Install complete
+
+Result:
+
+    PASS
+
+
+Prometheus Readiness
+--------------------
+
+Prometheus was accessed through a local Kubernetes port-forward.
+
+Command:
+
+    kubectl port-forward \
+      -n observability \
+      service/havenbridge-monitoring-kub-prometheus \
+      9090:9090
+
+Readiness validation:
+
+    curl -s http://127.0.0.1:9090/-/ready
+
+Result:
+
+    Prometheus Server is Ready.
+
+Validation:
+
+    PASS
+
+
+Prometheus Query API
+--------------------
+
+Command:
+
+    curl -sG \
+      'http://127.0.0.1:9090/api/v1/query' \
+      --data-urlencode 'query=up' \
+      | python3 -m json.tool
+
+Result:
+
+    status: success
+
+This confirmed that Prometheus was operational and returning discovered target
+metrics.
+
+Validation:
+
+    PASS
+
+
+Node Exporter Validation
+------------------------
+
+Prometheus node-exporter was deployed as a DaemonSet across all five
+Kubernetes nodes.
+
+Prometheus query:
+
+    curl -sG \
+      'http://127.0.0.1:9090/api/v1/query' \
+      --data-urlencode 'query=up{job="node-exporter"}' \
+      | python3 -m json.tool
+
+Validated targets:
+
+    172.16.10.31:9100    up=1
+    172.16.10.32:9100    up=1
+    172.16.10.33:9100    up=1
+    172.16.10.34:9100    up=1
+    172.16.10.35:9100    up=1
+
+Result:
+
+    5/5 PASS
+
+
+Initial Failed Target Discovery
+-------------------------------
+
+The following PromQL query was used to identify all discovered targets that
+Prometheus could not scrape:
+
+    up == 0
+
+CLI equivalent:
+
+    curl -sG \
+      'http://127.0.0.1:9090/api/v1/query' \
+      --data-urlencode 'query=up == 0' \
+      | python3 -m json.tool
+
+Initial failed targets included:
+
+    kube-proxy                 5
+    kube-scheduler             3
+    kube-controller-manager    3
+    etcd                       3
+
+The workloads themselves were healthy.
+
+The failures were caused by their metrics endpoints being bound only to
+127.0.0.1 and therefore unavailable to Prometheus over the Kubernetes node
+network.
+
+
+kube-proxy Metrics Failure
+--------------------------
+
+Initial Prometheus query:
+
+    curl -sG \
+      'http://127.0.0.1:9090/api/v1/query' \
+      --data-urlencode 'query=up{job="kube-proxy"}' \
+      | python3 -m json.tool
+
+Initial result:
+
+    172.16.10.31:10249    up=0
+    172.16.10.32:10249    up=0
+    172.16.10.33:10249    up=0
+    172.16.10.34:10249    up=0
+    172.16.10.35:10249    up=0
+
+The kube-proxy Pods themselves were confirmed healthy:
+
+    kubectl get pods -n kube-system \
+      -l k8s-app=kube-proxy \
+      -o wide
+
+Result:
+
+    5/5 kube-proxy Pods Running
+
+
+kube-proxy Configuration Investigation
+--------------------------------------
+
+Command:
+
+    kubectl -n kube-system get configmap kube-proxy \
+      -o jsonpath='{.data.config\.conf}' \
+      | grep -E 'metricsBindAddress|healthzBindAddress'
+
+Initial result:
+
+    healthzBindAddress: ""
+    metricsBindAddress: ""
+
+Listener validation:
+
+    sudo ss -lntp | grep 10249
+
+Initial result:
+
+    127.0.0.1:10249
+
+Local metrics test:
+
+    curl -s http://127.0.0.1:10249/metrics | head -20
+
+Result:
+
+    PASS
+
+Node-IP metrics test:
+
+    curl -sS --connect-timeout 3 \
+      http://172.16.10.31:10249/metrics \
+      | head -20
+
+Initial result:
+
+    Connection failed
+
+This proved that kube-proxy metrics were reachable only through localhost.
+
+
+kube-proxy Remediation
+----------------------
+
+Before modifying the ConfigMap, a backup was created:
+
+    kubectl -n kube-system get configmap kube-proxy \
+      -o yaml \
+      > /tmp/kube-proxy-config-before-observability.yaml
+
+The kube-proxy ConfigMap was edited:
+
+    KUBE_EDITOR=vim kubectl -n kube-system edit configmap kube-proxy
+
+The following configuration was changed:
+
+    metricsBindAddress: ""
+
+to:
+
+    metricsBindAddress: "0.0.0.0:10249"
+
+The new configuration was validated:
+
+    kubectl -n kube-system get configmap kube-proxy \
+      -o jsonpath='{.data.config\.conf}' \
+      | grep -E 'metricsBindAddress|healthzBindAddress'
+
+Result:
+
+    healthzBindAddress: ""
+    metricsBindAddress: "0.0.0.0:10249"
+
+
+kube-proxy Rolling Restart
+--------------------------
+
+Before restarting kube-proxy, the DaemonSet update strategy was checked:
+
+    kubectl -n kube-system get daemonset kube-proxy \
+      -o jsonpath='Strategy: {.spec.updateStrategy.type}{"\n"}MaxUnavailable: {.spec.updateStrategy.rollingUpdate.maxUnavailable}{"\n"}'
+
+Result:
+
+    Strategy: RollingUpdate
+    MaxUnavailable: 1
+
+This allowed kube-proxy to be replaced one node at a time.
+
+Restart command:
+
+    kubectl -n kube-system rollout restart daemonset/kube-proxy
+
+Rollout validation:
+
+    kubectl -n kube-system rollout status daemonset/kube-proxy \
+      --timeout=5m
+
+Result:
+
+    daemon set "kube-proxy" successfully rolled out
+
+Listener validation:
+
+    sudo ss -lntp | grep 10249
+
+Result:
+
+    *:10249
+
+Network metrics validation:
+
+    curl -sS \
+      http://172.16.10.31:10249/metrics \
+      | head -20
+
+Result:
+
+    PASS
+
+
+kube-proxy Final Prometheus Validation
+--------------------------------------
+
+Command:
+
+    curl -sG \
+      'http://127.0.0.1:9090/api/v1/query' \
+      --data-urlencode 'query=up{job="kube-proxy"}' \
+      | python3 -m json.tool
+
+Final result:
+
+    172.16.10.31:10249    up=1
+    172.16.10.32:10249    up=1
+    172.16.10.33:10249    up=1
+    172.16.10.34:10249    up=1
+    172.16.10.35:10249    up=1
+
+Result:
+
+    5/5 PASS
+
+
+Control-Plane Metrics Investigation
+-----------------------------------
+
+After kube-proxy was fixed, the following Prometheus query identified the
+remaining failed targets:
+
+    up == 0
+
+The remaining failed jobs were:
+
+    kube-scheduler
+    kube-controller-manager
+    kube-etcd
+
+Listener investigation on eph-cp01:
+
+    sudo ss -lntp | grep -E '10257|10259|2381'
+
+Initial result:
+
+    127.0.0.1:10259    kube-scheduler
+    127.0.0.1:10257    kube-controller-manager
+    127.0.0.1:2381     etcd
+
+This confirmed that all three control-plane metrics endpoints were bound to
+localhost.
+
+
+kube-scheduler Investigation
+----------------------------
+
+Command:
+
+    kubectl -n kube-system get pod kube-scheduler-eph-cp01 \
+      -o jsonpath='{.spec.containers[0].command}' \
+      | tr ' ' '\n' \
+      | grep -- '--bind-address'
+
+Initial result:
+
+    --bind-address=127.0.0.1
+
+Static Pod manifest:
+
+    /etc/kubernetes/manifests/kube-scheduler.yaml
+
+Probe inspection:
+
+    sudo grep -nE \
+      'bind-address|livenessProbe|readinessProbe|startupProbe|host:|port:' \
+      /etc/kubernetes/manifests/kube-scheduler.yaml
+
+The probes used:
+
+    host: 127.0.0.1
+
+The bind address was changed from:
+
+    --bind-address=127.0.0.1
+
+to:
+
+    --bind-address=0.0.0.0
+
+The localhost probe addresses were left unchanged.
+
+Each control-plane node was changed and validated individually.
+
+
+kube-scheduler Listener Validation
+----------------------------------
+
+Command:
+
+    sudo ss -lntp | grep 10259
+
+Result after remediation:
+
+    *:10259
+
+Unauthenticated test:
+
+    curl -ks \
+      https://172.16.10.31:10259/metrics \
+      | head -20
+
+Result:
+
+    HTTP 403 Forbidden
+    User "system:anonymous"
+
+The 403 response proved that the HTTPS metrics endpoint was reachable but
+required authorization.
+
+Prometheus uses its configured Kubernetes identity and was able to scrape the
+endpoint successfully.
+
+
+kube-scheduler Final Prometheus Validation
+------------------------------------------
+
+Validated targets:
+
+    172.16.10.31:10259    up=1
+    172.16.10.32:10259    up=1
+    172.16.10.33:10259    up=1
+
+Result:
+
+    3/3 PASS
+
+
+kube-controller-manager Investigation
+-------------------------------------
+
+Command:
+
+    kubectl -n kube-system get pod kube-controller-manager-eph-cp01 \
+      -o jsonpath='{.spec.containers[0].command}' \
+      | tr ' ' '\n' \
+      | grep -- '--bind-address'
+
+Initial result:
+
+    --bind-address=127.0.0.1
+
+Static Pod manifest:
+
+    /etc/kubernetes/manifests/kube-controller-manager.yaml
+
+Probe inspection:
+
+    sudo grep -nE \
+      'bind-address|livenessProbe|readinessProbe|startupProbe|host:|port:' \
+      /etc/kubernetes/manifests/kube-controller-manager.yaml
+
+The bind address was changed from:
+
+    --bind-address=127.0.0.1
+
+to:
+
+    --bind-address=0.0.0.0
+
+Each control-plane node was modified and validated individually.
+
+
+kube-controller-manager Final Prometheus Validation
+---------------------------------------------------
+
+Command:
+
+    curl -sG \
+      'http://127.0.0.1:9090/api/v1/query' \
+      --data-urlencode 'query=up{job="kube-controller-manager"}' \
+      | python3 -m json.tool
+
+Validated targets:
+
+    172.16.10.31:10257    up=1
+    172.16.10.32:10257    up=1
+    172.16.10.33:10257    up=1
+
+Result:
+
+    3/3 PASS
+
+
+etcd Metrics Investigation
+--------------------------
+
+Command:
+
+    kubectl -n kube-system get pod etcd-eph-cp01 \
+      -o jsonpath='{.spec.containers[0].command}' \
+      | tr ' ' '\n' \
+      | grep -- '--listen-metrics-urls'
+
+Initial result:
+
+    --listen-metrics-urls=http://127.0.0.1:2381
+
+Static Pod manifest:
+
+    /etc/kubernetes/manifests/etcd.yaml
+
+Probe inspection:
+
+    sudo grep -nE \
+      'listen-metrics-urls|livenessProbe|readinessProbe|startupProbe|host:|port:' \
+      /etc/kubernetes/manifests/etcd.yaml
+
+Initial etcd metrics listener:
+
+    127.0.0.1:2381
+
+
+etcd Remediation
+----------------
+
+Unlike kube-scheduler and kube-controller-manager, etcd was not configured to
+listen on every interface.
+
+Instead, localhost access was preserved while each control-plane node's
+specific management IP was added.
+
+eph-cp01:
+
+    --listen-metrics-urls=http://127.0.0.1:2381,http://172.16.10.31:2381
+
+eph-cp02:
+
+    --listen-metrics-urls=http://127.0.0.1:2381,http://172.16.10.32:2381
+
+eph-cp03:
+
+    --listen-metrics-urls=http://127.0.0.1:2381,http://172.16.10.33:2381
+
+The three etcd members were changed one member at a time.
+
+After every member restart, cluster health was validated before proceeding to
+the next member.
+
+
+etcd Static Pod Restart Behavior
+--------------------------------
+
+etcd took longer to recreate than kube-scheduler or kube-controller-manager.
+
+Observed sequence:
+
+    Running
+      ↓
+    Terminating
+      ↓
+    Pending
+      ↓
+    Running
+
+This is expected because etcd is a stateful distributed database.
+
+During startup it must:
+
+    open its persistent data
+    load its WAL and database state
+    rejoin its peer cluster
+    synchronize with other members
+    pass readiness checks
+
+Administrators should therefore allow additional time for an etcd static Pod
+to restart before assuming that a configuration change has failed.
+
+
+etcd Direct Metrics Validation
+------------------------------
+
+Example:
+
+    curl -s \
+      http://172.16.10.31:2381/metrics \
+      | head -20
+
+Metrics such as the following were successfully returned:
+
+    etcd_cluster_version
+    etcd_debugging_auth_revision
+    etcd_debugging_disk_backend_commit_rebalance_duration_seconds
+
+Direct metrics access was validated on:
+
+    172.16.10.31:2381
+    172.16.10.32:2381
+    172.16.10.33:2381
+
+
+etcd Cluster Health Validation
+------------------------------
+
+After each etcd member change:
+
+    kubectl get --raw='/readyz?verbose' \
+      | grep -E 'etcd|readyz check passed'
+
+Validated result:
+
+    [+]etcd ok
+    [+]etcd-readiness ok
+    readyz check passed
+
+Result:
+
+    PASS
+
+
+etcd Final Prometheus Validation
+--------------------------------
+
+Validated targets:
+
+    172.16.10.31:2381    up=1
+    172.16.10.32:2381    up=1
+    172.16.10.33:2381    up=1
+
+Result:
+
+    3/3 PASS
+
+
+Final Failed-Target Validation
+------------------------------
+
+Command:
+
+    curl -sG \
+      'http://127.0.0.1:9090/api/v1/query' \
+      --data-urlencode 'query=up == 0' \
+      | python3 -m json.tool
+
+Final result:
+
+    "result": []
+
+This confirms that Prometheus had no discovered targets reporting up=0 at the
+time of validation.
+
+Result:
+
+    PASS
+
+
+Healthy Target Count
+--------------------
+
+Command:
+
+    curl -sG \
+      'http://127.0.0.1:9090/api/v1/query' \
+      --data-urlencode 'query=count(up == 1)' \
+      | python3 -m json.tool
+
+Result:
+
+    46
+
+Final target state:
+
+    Healthy targets:    46
+    Unhealthy targets:   0
+
+
+Security Considerations
+-----------------------
+
+The metrics remediation intentionally made several operational endpoints
+reachable over the internal HavenBridge lab network.
+
+These include:
+
+    kube-proxy             TCP 10249
+    kube-scheduler         TCP 10259
+    kube-controller-manager TCP 10257
+    etcd metrics           TCP 2381
+    node-exporter          TCP 9100
+
+These endpoints are intended for internal monitoring.
+
+They must not be exposed directly to untrusted or public networks.
+
+Scheduler and controller-manager metrics remain protected by Kubernetes
+authentication and authorization.
+
+kube-proxy, node-exporter, and etcd metrics endpoints should be treated as
+internal operational endpoints and protected by network-level controls.
+
+
+Final Validation Summary
+------------------------
+
+Prometheus Helm release:             PASS
+Prometheus readiness:                PASS
+Prometheus query API:                PASS
+node-exporter:                       5/5 PASS
+kube-proxy:                          5/5 PASS
+kube-scheduler:                      3/3 PASS
+kube-controller-manager:             3/3 PASS
+etcd:                                3/3 PASS
+Kubernetes API readiness:            PASS
+etcd readiness:                      PASS
+Failed Prometheus targets:           0
+Healthy Prometheus targets:          46
+
+
+FINAL RESULT:
+
+    HAVENBRIDGE PROMETHEUS TARGET VALIDATION PASSED
