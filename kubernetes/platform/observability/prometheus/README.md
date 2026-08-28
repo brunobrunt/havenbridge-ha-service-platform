@@ -899,6 +899,14 @@ Unhealthy targets:   0
 
 Prometheus target collection is therefore considered operational.
 
+## HavenBridge Application Metrics ServiceMonitor
+
+Prometheus application monitoring for the HavenBridge FastAPI backend is
+configured through:
+
+```text
+kubernetes/platform/observability/prometheus/havenbridge-api-servicemonitor.yaml
+
 
 ## Security Considerations for Metrics Endpoints
 

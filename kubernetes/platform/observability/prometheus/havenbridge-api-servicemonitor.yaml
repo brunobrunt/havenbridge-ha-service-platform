@@ -1,0 +1,47 @@
+#Prometheus
+#    ↓
+#looks for ServiceMonitor label:
+#release=havenbridge-monitoring
+#    ↓
+#ServiceMonitor
+#    ↓
+#selects Service labels:
+#app.kubernetes.io/name=havenbridge-api
+#app.kubernetes.io/component=backend
+#app.kubernetes.io/part-of=havenbridge
+#    ↓
+#havenbridge-api Service
+#    ↓
+#port named "http"
+#    ↓
+#/metrics
+
+
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+
+metadata:
+  name: havenbridge-api
+  namespace: havenbridge
+
+  # Prometheus is configured to discover ServiceMonitors carrying this label.
+  labels:
+    release: havenbridge-monitoring
+    app.kubernetes.io/name: havenbridge-api
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: havenbridge
+
+spec:
+  # Select the existing HavenBridge API Kubernetes Service.
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: havenbridge-api
+      app.kubernetes.io/component: backend
+      app.kubernetes.io/part-of: havenbridge
+
+  endpoints:
+    - port: http
+      path: /metrics
+      scheme: http
+      interval: 30s
+      scrapeTimeout: 10s

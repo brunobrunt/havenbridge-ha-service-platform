@@ -1,0 +1,290 @@
+HavenBridge Application Metrics Validation
+===========================================
+
+Validation Date
+---------------
+
+2026-08-28
+
+
+Purpose
+-------
+
+Validate end-to-end Prometheus monitoring of the HavenBridge FastAPI
+application.
+
+The validation confirms:
+
+- HavenBridge exposes Prometheus metrics at /metrics.
+- A ServiceMonitor discovers the HavenBridge API Service.
+- Prometheus discovers both HavenBridge API replicas.
+- Kubernetes NetworkPolicy permits only the required Prometheus traffic.
+- Both Prometheus scrape targets report UP.
+- Custom HavenBridge request and latency metrics are stored in Prometheus.
+
+
+Application Metrics Architecture
+--------------------------------
+
+HavenBridge API Pods
+        |
+        | /metrics
+        v
+havenbridge-api Service
+        |
+        v
+ServiceMonitor
+        |
+        v
+Prometheus
+        |
+        v
+Grafana
+
+
+ServiceMonitor
+--------------
+
+ServiceMonitor:
+
+havenbridge-api
+
+Namespace:
+
+havenbridge
+
+Prometheus discovery label:
+
+release=havenbridge-monitoring
+
+Service selector:
+
+app.kubernetes.io/name=havenbridge-api
+app.kubernetes.io/component=backend
+app.kubernetes.io/part-of=havenbridge
+
+Endpoint configuration:
+
+port: http
+path: /metrics
+scheme: http
+interval: 30s
+scrapeTimeout: 10s
+
+The Kubernetes API accepted the manifest during server-side validation:
+
+kubectl apply \
+  --dry-run=server \
+  -f /tmp/havenbridge-api-servicemonitor.yaml
+
+Result:
+
+servicemonitor.monitoring.coreos.com/havenbridge-api created (server dry run)
+
+The ServiceMonitor was then applied successfully.
+
+
+Initial Prometheus Target Validation
+------------------------------------
+
+Prometheus successfully discovered both HavenBridge API replicas:
+
+10.244.176.251:8000
+10.244.35.66:8000
+
+However, both targets initially reported:
+
+health: down
+
+Prometheus error:
+
+context deadline exceeded
+
+PromQL:
+
+up{namespace="havenbridge",service="havenbridge-api"}
+
+Initial result:
+
+10.244.176.251:8000 = 0
+10.244.35.66:8000   = 0
+
+
+Root Cause
+----------
+
+The HavenBridge API Pods were already protected by Kubernetes NetworkPolicy.
+
+The existing ingress policy:
+
+allow-traefik-to-havenbridge-api
+
+allowed Traefik to reach TCP port 8000 but did not permit Prometheus traffic.
+
+Because the HavenBridge API Pods were ingress-isolated, Prometheus could
+discover the targets but could not connect to their /metrics endpoints.
+
+
+NetworkPolicy Remediation
+-------------------------
+
+A dedicated ingress NetworkPolicy was added:
+
+allow-prometheus-to-havenbridge-api
+
+The policy allows traffic only when both conditions match:
+
+Namespace:
+
+kubernetes.io/metadata.name=observability
+
+Prometheus Pod:
+
+app.kubernetes.io/name=prometheus
+app.kubernetes.io/instance=havenbridge-monitoring-kub-prometheus
+
+Destination:
+
+HavenBridge API Pods
+
+Port:
+
+TCP 8000
+
+This maintains least privilege and does not open the HavenBridge API metrics
+port to the entire Kubernetes cluster.
+
+
+Successful Target Validation
+----------------------------
+
+After applying the Prometheus-specific NetworkPolicy, the following PromQL
+query was executed:
+
+up{namespace="havenbridge",service="havenbridge-api"}
+
+Result:
+
+havenbridge-api-5554768c99-tctwm
+10.244.35.66:8000
+up = 1
+
+havenbridge-api-5554768c99-hksfn
+10.244.176.251:8000
+up = 1
+
+Result:
+
+PASS
+
+Prometheus successfully scrapes both HavenBridge API replicas.
+
+
+Custom Request Metric Validation
+--------------------------------
+
+PromQL:
+
+havenbridge_http_requests_total
+
+Prometheus returned metric series for both HavenBridge API replicas.
+
+Observed labels included:
+
+method="GET"
+route="/health/ready"
+route="/health/live"
+route="/"
+status_code="200"
+namespace="havenbridge"
+service="havenbridge-api"
+
+Representative values included more than 5,500 readiness requests and more
+than 2,700 liveness requests per replica.
+
+The high health-check request counts are expected because Kubernetes
+continuously executes application readiness and liveness probes.
+
+Result:
+
+PASS
+
+
+Custom Request Duration Metric Validation
+-----------------------------------------
+
+PromQL:
+
+havenbridge_http_request_duration_seconds_count
+
+Prometheus returned request-duration metric series for both HavenBridge API
+replicas.
+
+Observed routes included:
+
+/health/ready
+/health/live
+/
+
+The metric contains the expected application, Pod, Service, method, and route
+labels.
+
+Result:
+
+PASS
+
+
+Final Validation Status
+-----------------------
+
+PASS
+
+The HavenBridge application metrics pipeline is operational:
+
+HavenBridge FastAPI
+        |
+        v
+/metrics
+        |
+        v
+ServiceMonitor
+        |
+        v
+Prometheus target discovery
+        |
+        v
+NetworkPolicy-authorized scrape
+        |
+        v
+Both replicas UP
+        |
+        v
+Custom HavenBridge metrics stored in Prometheus
+
+
+Validated Components
+--------------------
+
+FastAPI /metrics endpoint                         PASS
+ServiceMonitor Kubernetes resource               PASS
+Prometheus ServiceMonitor discovery               PASS
+HavenBridge Service selection                     PASS
+Both HavenBridge API replicas discovered          PASS
+NetworkPolicy troubleshooting                     PASS
+Prometheus-to-API TCP 8000 authorization          PASS
+Prometheus target health up=1                     PASS
+havenbridge_http_requests_total                    PASS
+havenbridge_http_request_duration_seconds_count    PASS
+
+
+Next Step
+---------
+
+Use the validated HavenBridge application metrics to build Grafana
+application dashboards for:
+
+- request traffic
+- HTTP errors
+- request latency
+- per-replica health
+- route-level behavior

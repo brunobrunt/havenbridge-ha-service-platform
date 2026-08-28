@@ -1358,6 +1358,17 @@ kubernetes/platform/observability/alloy/
 
 ---
 
+## Observability Phase 4 — HavenBridge Application Metrics
+
+Observability Phase 4 adds application-level Prometheus metrics to the
+HavenBridge FastAPI backend.
+
+The application exposes Prometheus metrics through:
+
+```text
+/metrics
+
+
 ## Current Next Step
 
 The current observability phase is:
@@ -1397,3 +1408,15 @@ Command:
 
 ```bash
 kubectl get namespace monitoring observability 2>/dev/null || true
+
+
+
+## Observability Phase 4 — HavenBridge Application Metrics
+
+Observability Phase 4 adds application-level Prometheus metrics to the
+HavenBridge FastAPI backend.
+
+The application exposes Prometheus metrics through:
+
+```text
+/metrics
