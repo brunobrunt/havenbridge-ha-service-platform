@@ -1,0 +1,321 @@
+HavenBridge Grafana Validation
+==============================
+
+Purpose
+-------
+
+Record validation of the HavenBridge Grafana deployment, persistent access,
+Prometheus datasource, and representative Kubernetes dashboards.
+
+
+Grafana Deployment
+------------------
+
+Namespace:
+
+    observability
+
+Grafana workload:
+
+    havenbridge-monitoring-grafana
+
+Validated state:
+
+    3/3 Running
+
+Grafana Kubernetes Service:
+
+    havenbridge-monitoring-grafana
+
+Service type:
+
+    ClusterIP
+
+Service port:
+
+    80
+
+
+Grafana Health
+--------------
+
+Validation command:
+
+    curl -s \
+      http://127.0.0.1:3000/api/health \
+      | python3 -m json.tool
+
+Validated response:
+
+    database: ok
+    version: 13.2.0
+
+Result:
+
+    PASS
+
+
+Prometheus Datasource
+---------------------
+
+Datasource provisioning objects were checked with:
+
+    kubectl get configmaps,secrets \
+      -n observability \
+      -l grafana_datasource=1
+
+Validated object:
+
+    configmap/havenbridge-monitoring-kub-grafana-datasource
+
+Grafana datasource:
+
+    Name: Prometheus
+    Type: Prometheus
+    URL: http://havenbridge-monitoring-kub-prometheus.observability:9090/
+    Default: Yes
+
+Result:
+
+    PASS
+
+
+Grafana Dashboard Provisioning
+------------------------------
+
+Command:
+
+    kubectl get configmaps \
+      -n observability \
+      -l grafana_dashboard=1 \
+      --no-headers \
+      | wc -l
+
+Result:
+
+    29
+
+Provisioned dashboards:
+
+    29
+
+Result:
+
+    PASS
+
+
+Representative Dashboard Validation
+-----------------------------------
+
+etcd
+----
+
+Validated:
+
+    Up: 3
+
+Validated endpoints:
+
+    172.16.10.31:2381
+    172.16.10.32:2381
+    172.16.10.33:2381
+
+Populated panels included:
+
+    RPC rate
+    Active streams
+    DB size
+    Disk sync duration
+    Memory
+    Client traffic
+    Peer traffic
+
+Result:
+
+    PASS
+
+
+Kubernetes / API server
+-----------------------
+
+Validated endpoints:
+
+    172.16.10.31:6443
+    172.16.10.32:6443
+    172.16.10.33:6443
+
+Representative observed values:
+
+    Overall availability: approximately 99.88%
+    Read availability: approximately 99.85%
+    Write availability: approximately 99.95%
+
+Populated panels included:
+
+    Availability
+    Error Budget
+    Request Rate
+    Errors
+    Request Duration
+    Work Queue Depth
+    Work Queue Latency
+    Memory
+    CPU
+    Goroutines
+
+Result:
+
+    PASS
+
+
+Kubernetes / Controller Manager
+-------------------------------
+
+Validated:
+
+    Up: 3
+
+Validated endpoints:
+
+    172.16.10.31:10257
+    172.16.10.32:10257
+    172.16.10.33:10257
+
+Populated panels included:
+
+    Work Queue Add Rate
+    Work Queue Depth
+    Work Queue Latency
+    Kube API Request Rate
+    GET Request Latency
+    POST Request Latency
+    Memory
+    CPU
+    Goroutines
+
+Result:
+
+    PASS
+
+
+Kubernetes / Compute Resources / Nodes Overview
+-----------------------------------------------
+
+Validated cluster:
+
+    Nodes: 5
+    Pods: approximately 69 during validation
+
+Validated nodes:
+
+    eph-cp01
+    eph-cp02
+    eph-cp03
+    eph-worker01
+    eph-worker02
+
+Populated panels included:
+
+    Node and Pod Count
+    CPU Usage
+    Memory Usage
+    CPU Utilization per Node
+    Memory Utilization per Node
+
+Result:
+
+    PASS
+
+
+Node Exporter / Nodes
+---------------------
+
+Validated node-exporter metrics included:
+
+    CPU Usage
+    Load Average
+    Memory Usage
+    Disk I/O
+    Filesystem Usage
+
+Example validated instance:
+
+    172.16.10.35:9100
+
+Result:
+
+    PASS
+
+
+Persistent Grafana Access
+-------------------------
+
+Persistent access path:
+
+    Browser on syrus
+          |
+          v
+    127.0.0.1:3000
+          |
+          v
+    havenbridge-grafana-tunnel.service
+          |
+          v
+    SSH
+          |
+          v
+    eph-cp01:127.0.0.1:3000
+          |
+          v
+    havenbridge-grafana-portforward.service
+          |
+          v
+    Grafana Kubernetes Service
+          |
+          v
+    Grafana Pod
+
+Persistent services:
+
+    syrus:
+        havenbridge-grafana-tunnel.service
+
+    eph-cp01:
+        havenbridge-grafana-portforward.service
+
+Both services:
+
+    enabled
+    active
+
+Browser URL:
+
+    http://127.0.0.1:3000
+
+Result:
+
+    PASS
+
+
+Final Validation Summary
+------------------------
+
+Grafana Pod                              PASS
+Grafana Service                          PASS
+Grafana HTTP health                      PASS
+Grafana database health                  PASS
+Prometheus datasource                    PASS
+Provisioned dashboards                   29
+etcd dashboard                           PASS
+Kubernetes API server dashboard          PASS
+Controller Manager dashboard             PASS
+Nodes Overview dashboard                 PASS
+Node Exporter dashboard                  PASS
+Persistent Grafana port-forward          PASS
+Persistent Grafana SSH tunnel            PASS
+Browser access from syrus                PASS
+
+
+FINAL RESULT:
+
+    HAVENBRIDGE GRAFANA VALIDATION PASSED

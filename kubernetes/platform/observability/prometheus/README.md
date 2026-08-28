@@ -948,6 +948,35 @@ control-plane health validation
 final target health
 ```
 
+## Persistent Administrative Access
+
+Prometheus remains exposed internally as a Kubernetes `ClusterIP` service.
+
+Persistent administrative access from the `syrus` workstation is provided
+using two systemd-managed forwarding layers:
+
+```text
+Browser on syrus
+http://127.0.0.1:9090
+        |
+        v
+havenbridge-prometheus-tunnel.service
+        |
+        | SSH tunnel
+        v
+eph-cp01:127.0.0.1:9090
+        |
+        v
+havenbridge-prometheus-portforward.service
+        |
+        | kubectl port-forward
+        v
+Prometheus Kubernetes Service
+        |
+        v
+Prometheus
+
+
 Final validation:
 
 ```text
