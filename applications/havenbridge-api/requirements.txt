@@ -21,3 +21,8 @@ pydantic-settings==2.14.2
 # Email Validator supports Pydantic's EmailStr type so inquiry email
 # addresses are checked before data reaches PostgreSQL.
 email-validator==2.3.0
+
+# Prometheus Client exposes HavenBridge application metrics in Prometheus
+# format so request, latency, process, and future business metrics can be
+# collected by the Kubernetes monitoring stack.
+prometheus-client==0.26.0

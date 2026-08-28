@@ -1893,3 +1893,513 @@ v1.0.0
 
 can automatically be reported by the running API without editing Python source
 code for each release.
+
+
+## HavenBridge Application Metrics
+
+The HavenBridge FastAPI backend now exposes Prometheus-compatible application
+metrics through:
+
+```text
+/metrics
+```
+
+This is the first application-level observability capability in HavenBridge.
+
+Previously, Prometheus monitored the Kubernetes platform and infrastructure,
+including:
+
+```text
+Kubernetes API server
+etcd
+kube-controller-manager
+kube-scheduler
+kube-proxy
+nodes
+Pods
+```
+
+The application metrics implementation extends observability into the
+HavenBridge backend itself.
+
+The monitoring path is designed to become:
+
+```text
+HavenBridge FastAPI
+        |
+        v
+     /metrics
+        |
+        v
+Kubernetes Service
+        |
+        v
+ServiceMonitor
+        |
+        v
+Prometheus
+        |
+        v
+Grafana
+```
+
+The `/metrics` endpoint has been validated locally.
+
+The Kubernetes `ServiceMonitor` integration will be implemented after the new
+application version is built and deployed.
+
+
+### Prometheus Python Client
+
+The application uses the official Prometheus Python client library:
+
+```text
+prometheus-client==0.26.0
+```
+
+The dependency is defined in:
+
+```text
+applications/havenbridge-api/requirements.txt
+```
+
+It was installed into the HavenBridge development virtual environment using:
+
+```bash
+cd /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-api
+
+source .venv/bin/activate
+
+pip install -r requirements.txt
+```
+
+Installed version validation:
+
+```bash
+python -c \
+  'from importlib.metadata import version; print(version("prometheus-client"))'
+```
+
+Validated result:
+
+```text
+0.26.0
+```
+
+
+### Metrics Module
+
+Prometheus instrumentation is implemented in:
+
+```text
+applications/havenbridge-api/app/metrics.py
+```
+
+Keeping the metrics implementation separate from `app/main.py` helps preserve
+the existing small application-entry-point design.
+
+The metrics module provides:
+
+```text
+HTTP request counting
+HTTP request-duration measurement
+Prometheus metric generation
+/metrics endpoint registration
+```
+
+The main FastAPI application imports:
+
+```python
+from app.metrics import configure_metrics
+```
+
+After the FastAPI application is created, metrics support is registered with:
+
+```python
+configure_metrics(app)
+```
+
+
+### HTTP Request Counter
+
+The application exposes:
+
+```text
+havenbridge_http_requests_total
+```
+
+This is a Prometheus Counter.
+
+It records the number of HTTP requests processed by HavenBridge using the
+following labels:
+
+```text
+method
+route
+status_code
+```
+
+Example:
+
+```text
+havenbridge_http_requests_total{
+    method="GET",
+    route="/health/live",
+    status_code="200"
+}
+```
+
+This allows Prometheus and Grafana to answer questions such as:
+
+```text
+How many requests is HavenBridge receiving?
+Which endpoints receive the most traffic?
+How many requests return 2xx responses?
+Are 4xx responses increasing?
+Are 5xx responses increasing?
+```
+
+
+### HTTP Request Duration Histogram
+
+The application also exposes:
+
+```text
+havenbridge_http_request_duration_seconds
+```
+
+This is a Prometheus Histogram.
+
+It records how long HavenBridge API requests take to complete.
+
+Labels:
+
+```text
+method
+route
+```
+
+Prometheus automatically produces histogram series including:
+
+```text
+havenbridge_http_request_duration_seconds_bucket
+havenbridge_http_request_duration_seconds_count
+havenbridge_http_request_duration_seconds_sum
+```
+
+These metrics will later allow queries and Grafana dashboards for:
+
+```text
+average request duration
+p50 latency
+p95 latency
+p99 latency
+slow endpoints
+latency changes during incidents
+```
+
+
+### Route Labels and Cardinality Protection
+
+The application intentionally records FastAPI route templates instead of raw
+request URLs.
+
+For example, the desired label is:
+
+```text
+/api/v1/inquiries/{inquiry_id}
+```
+
+instead of creating separate labels such as:
+
+```text
+/api/v1/inquiries/1001
+/api/v1/inquiries/1002
+/api/v1/inquiries/1003
+```
+
+Using every unique URL value would create an ever-growing number of Prometheus
+time series.
+
+This problem is known as:
+
+```text
+high cardinality
+```
+
+High-cardinality labels can increase Prometheus memory usage, storage
+requirements, and query cost.
+
+Using stable route templates keeps the HavenBridge metrics predictable and
+safe to aggregate.
+
+
+### Unmatched Requests
+
+Requests that do not match a FastAPI route are recorded as:
+
+```text
+route="unmatched"
+```
+
+During local validation, the browser requested:
+
+```text
+/favicon.ico
+```
+
+which returned:
+
+```text
+404 Not Found
+```
+
+The metrics correctly recorded:
+
+```text
+havenbridge_http_requests_total{
+    method="GET",
+    route="unmatched",
+    status_code="404"
+}
+```
+
+This proves that failed or unknown requests can also be observed without using
+the raw URL as a Prometheus label.
+
+
+### Excluding `/metrics` from Application Traffic
+
+Prometheus will regularly request:
+
+```text
+/metrics
+```
+
+to collect application metrics.
+
+These scrape requests are intentionally excluded from the HavenBridge HTTP
+request counter and request-duration histogram.
+
+Otherwise Prometheus monitoring traffic would artificially increase the
+application's own request statistics.
+
+The metrics endpoint remains observable through normal Prometheus target
+health while not being counted as user/application traffic.
+
+
+### Local Metrics Validation
+
+The application was temporarily started on `syrus` for local development
+validation using:
+
+```bash
+uvicorn app.main:app \
+  --host 127.0.0.1 \
+  --port 8000
+```
+
+This command is only a local development validation method.
+
+The production HavenBridge application continues to run through its Kubernetes
+Deployment.
+
+The metrics endpoint was queried using:
+
+```bash
+curl -s \
+  http://127.0.0.1:8000/metrics \
+  | head -40
+```
+
+Prometheus-formatted output included standard Python process metrics such as:
+
+```text
+python_gc_objects_collected_total
+python_info
+process_virtual_memory_bytes
+process_resident_memory_bytes
+process_cpu_seconds_total
+process_open_fds
+```
+
+and HavenBridge-specific application metrics:
+
+```text
+havenbridge_http_requests_total
+havenbridge_http_request_duration_seconds
+```
+
+Application traffic was generated using:
+
+```bash
+curl -s http://127.0.0.1:8000/
+
+curl -s http://127.0.0.1:8000/health/live
+
+curl -s http://127.0.0.1:8000/health/ready
+```
+
+HavenBridge-specific metrics were then inspected with:
+
+```bash
+curl -s \
+  http://127.0.0.1:8000/metrics \
+  | grep '^havenbridge_'
+```
+
+Validated route labels included:
+
+```text
+route="/"
+route="/health/live"
+route="/health/ready"
+route="unmatched"
+```
+
+Validated status-code labels included:
+
+```text
+status_code="200"
+status_code="404"
+```
+
+No:
+
+```text
+route="/metrics"
+```
+
+series was present, confirming that Prometheus scrape traffic was correctly
+excluded from application traffic metrics.
+
+Result:
+
+```text
+PASS
+```
+
+
+### Automated Metrics Tests
+
+Automated regression tests are implemented in:
+
+```text
+applications/havenbridge-api/tests/test_metrics.py
+```
+
+The tests verify:
+
+```text
+/metrics returns HTTP 200
+Prometheus-formatted output is returned
+havenbridge_http_requests_total is exposed
+havenbridge_http_request_duration_seconds is exposed
+normal application requests are recorded
+HTTP method labels are recorded
+route labels are recorded
+HTTP status-code labels are recorded
+/metrics is excluded from application traffic
+```
+
+Metrics-specific tests:
+
+```bash
+pytest -q tests/test_metrics.py
+```
+
+Validated result:
+
+```text
+3 passed
+```
+
+The complete HavenBridge API test suite was also executed:
+
+```bash
+pytest -q
+```
+
+Validated result:
+
+```text
+15 passed
+```
+
+The remaining Starlette TestClient message is a dependency deprecation warning
+and did not cause a test failure.
+
+Result:
+
+```text
+PASS
+```
+
+
+### Application Metrics Validation Summary
+
+```text
+prometheus-client dependency                 PASS
+metrics module syntax                        PASS
+FastAPI metrics integration                  PASS
+/metrics endpoint                            PASS
+Prometheus exposition format                 PASS
+HTTP request counter                         PASS
+HTTP request-duration histogram              PASS
+stable route labels                          PASS
+unmatched request handling                   PASS
+/metrics self-exclusion                      PASS
+metrics-specific automated tests             3/3 PASS
+complete HavenBridge API tests              15/15 PASS
+```
+
+
+### Next Application Metrics Step
+
+The metrics implementation has currently been validated locally.
+
+The next deployment flow is:
+
+```text
+Application metrics code
+        |
+        v
+Git commit using feat:
+        |
+        v
+CI validation
+        |
+        v
+Semantic release
+        |
+        v
+HavenBridge v0.7.0
+        |
+        v
+Container image deployment
+        |
+        v
+Kubernetes HavenBridge API Pods
+        |
+        v
+Validate deployed /metrics
+        |
+        v
+Create ServiceMonitor
+        |
+        v
+Prometheus discovers HavenBridge API
+        |
+        v
+Grafana application dashboard
+```
+
+Because application metrics add new backward-compatible functionality, this
+change is expected to produce a semantic-version minor release:
+
+```text
+v0.6.0
+   |
+   v
+v0.7.0
+```

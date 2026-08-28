@@ -20,6 +20,7 @@ from app import models  # noqa: F401
 
 from app.config import get_settings
 from app.database import Base, get_engine
+from app.metrics import configure_metrics
 
 # Import the health and service-inquiry routers
 from app.routers import health, inquiries
@@ -108,6 +109,12 @@ app = FastAPI(
     ),
     lifespan=lifespan,
 )
+
+# Register Prometheus application metrics.
+#
+# This adds HTTP request instrumentation and exposes the /metrics endpoint
+# that Prometheus will scrape inside Kubernetes.
+configure_metrics(app)
 
 
 # Register health endpoints with the main FastAPI application.
