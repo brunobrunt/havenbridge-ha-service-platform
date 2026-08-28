@@ -1,0 +1,285 @@
+HavenBridge Automated Release and CD No-Release Validation
+==========================================================
+
+Purpose
+-------
+
+Validate that the HavenBridge CI/CD pipeline automatically progresses from
+CI to Release to CD without requiring a manual Release workflow trigger.
+
+This validation specifically tests the safe "no release required" path.
+
+Expected Flow
+-------------
+
+Developer
+   |
+   | git push main
+   v
+HavenBridge CI
+   |
+   | tests / build / validation
+   |
+   +---- FAIL -----------------------> STOP
+   |
+   +---- PASS
+          |
+          v
+HavenBridge Release
+          |
+          v
+next-version.sh
+     |
+     +---- release_needed=false
+     |          |
+     |          v
+     |     no application release
+     |          |
+     |          v
+     |     workflow succeeds
+     |
+     v
+HavenBridge CD
+     |
+     v
+Verify Release Was Created
+     |
+     +---- no semantic-version tag
+              |
+              v
+       deployment skipped
+
+
+Validation Date
+---------------
+
+2026-08-28
+
+
+Semantic Version Validation
+---------------------------
+
+The local semantic-version script was tested after fetching the current Git
+tags from origin.
+
+Current release tag:
+
+v0.7.0
+
+Command:
+
+GITHUB_OUTPUT=/tmp/havenbridge-next-version-output \
+  bash cicd/scripts/next-version.sh
+
+Result:
+
+No release-causing commit found.
+No HavenBridge application release is required.
+
+GitHub Actions outputs:
+
+release_needed=false
+bump=none
+tag=
+app_version=
+
+Result:
+
+PASS
+
+The script returned success without creating a new application release.
+
+
+Automatic Release Workflow Validation
+-------------------------------------
+
+A CI/CD-only commit was pushed to the main branch.
+
+The HavenBridge CI workflow ran automatically.
+
+After CI completed successfully, HavenBridge Release started automatically.
+
+No manual "Run workflow" action was required.
+
+Observed workflow:
+
+HavenBridge Release #8
+
+Result:
+
+SUCCESS
+
+The following release decision steps completed successfully:
+
+- Checkout release commit
+- Show release source
+- Determine next semantic version
+- Show semantic release decision
+
+Because release_needed=false, the following release-producing steps were
+correctly skipped:
+
+- Set up Python
+- Install Python dependencies
+- Run HavenBridge API tests
+- Build HavenBridge API Docker image
+- Install Kubeconform
+- Validate HavenBridge Kubernetes manifests
+- Log in to GitHub Container Registry
+- Tag HavenBridge API release image
+- Push HavenBridge API release images
+- Create and push Git release tag
+
+No v0.8.0 release was created.
+
+Result:
+
+PASS
+
+
+Automatic CD Workflow Validation
+--------------------------------
+
+After HavenBridge Release completed successfully, HavenBridge CD started
+automatically through its workflow_run trigger.
+
+Observed workflow:
+
+HavenBridge CD #7
+
+Result:
+
+SUCCESS
+
+The following CD verification job ran:
+
+Verify Release Was Created
+
+Result:
+
+PASS
+
+The verification job found that the release commit did not have a newly
+created semantic-version tag.
+
+The deployment job:
+
+Deploy HavenBridge API
+
+was correctly:
+
+SKIPPED
+
+No Kubernetes deployment was performed.
+
+Result:
+
+PASS
+
+
+Validated Pipeline Behaviour
+----------------------------
+
+The following automation path is now confirmed:
+
+git push main
+    |
+    v
+HavenBridge CI
+    |
+    v
+CI PASS
+    |
+    v
+HavenBridge Release starts automatically
+    |
+    v
+next-version.sh
+    |
+    v
+release_needed=false
+    |
+    v
+No release image or Git tag created
+    |
+    v
+Release workflow succeeds
+    |
+    v
+HavenBridge CD starts automatically
+    |
+    v
+Release tag verification
+    |
+    v
+No new release tag found
+    |
+    v
+Deployment skipped
+
+
+Safety Behaviour Confirmed
+--------------------------
+
+The validation proved that:
+
+1. Release no longer requires a manual workflow trigger after successful CI.
+
+2. Documentation, CI/CD, observability, and other non-application changes do
+   not automatically create a HavenBridge API version.
+
+3. A no-release decision is treated as a successful workflow result rather
+   than a failure.
+
+4. CD does not deploy merely because the Release workflow succeeded.
+
+5. CD verifies that a semantic-version tag exists for the exact release commit
+   before allowing the deployment job to run.
+
+6. The existing HavenBridge application remains on v0.7.0 when no new
+   application release is required.
+
+
+Validation Status
+-----------------
+
+PASS
+
+Safe automatic no-release path validated successfully.
+
+The remaining end-to-end validation is the positive release path:
+
+API release-causing commit
+        |
+        v
+CI PASS
+        |
+        v
+Automatic Release
+        |
+        v
+release_needed=true
+        |
+        v
+new semantic version
+        |
+        v
+release image
+        |
+        v
+Git tag
+        |
+        v
+Automatic CD
+        |
+        v
+self-hosted runner
+        |
+        v
+restricted Kubernetes RBAC
+        |
+        v
+Kubernetes rollout
+        |
+        v
+deployment verification

@@ -505,7 +505,68 @@ Namespace-scoped Kubernetes RBAC
 This means the self-hosted runner is now online, persistent across VM
 reboots, connected to GitHub and ready to receive HavenBridge CD jobs.
 
+## Automated CI → Release → CD Validation
 
+The HavenBridge CI/CD workflow has been extended so that application release
+evaluation and deployment no longer require a manual handoff after CI.
+
+The automated workflow is:
+
+```text
+Developer
+   |
+   | git push main
+   v
+HavenBridge CI
+   |
+   | tests / build / validation
+   |
+   +---- FAIL -----------------------> STOP
+   |
+   +---- PASS
+          |
+          v
+HavenBridge Release
+          |
+          v
+next-version.sh
+     |
+     +---- release_needed=false
+     |          |
+     |          v
+     |     no application release
+     |          |
+     |          v
+     |     workflow succeeds
+     |
+     +---- release_needed=true
+                |
+                v
+         new semantic version
+                |
+                v
+          release image
+                |
+                v
+             Git tag
+                |
+                v
+         HavenBridge CD
+                |
+                v
+       Verify Release Was Created
+                |
+                v
+        self-hosted CD runner
+                |
+                v
+       restricted Kubernetes RBAC
+                |
+                v
+        Kubernetes deployment
+                |
+                v
+        rollout verification
 
 ## Current Status
 
