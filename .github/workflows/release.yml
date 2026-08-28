@@ -1,53 +1,104 @@
 name: HavenBridge Release
 
 on:
+  # Automatically evaluate a release after HavenBridge CI completes on main.
+  workflow_run:
+    workflows:
+      - HavenBridge CI
+    types:
+      - completed
+    branches:
+      - main
+
+  # Manual fallback for testing or recovery.
+  # Allow this GitHub Actions workflow to be started manually from the GitHub UI.
   workflow_dispatch:
-#on:
-#  push:
-#    tags:
-#      - 'v*.*.*'
 
 permissions:
-  #contents: read
   contents: write
   packages: write
 
+# Prevent two release workflows from calculating/publishing versions
+# at the same time.
+concurrency:
+  group: havenbridge-release
+  cancel-in-progress: false
 
 jobs:
   release:
     name: Semantic Version Release
+
+    # Automatic releases are allowed only when:
+    #   - the upstream workflow was HavenBridge CI,
+    #   - CI succeeded,
+    #   - CI was triggered by a push,
+    #   - the tested branch was main.
+    #
+    # Manual execution is allowed only from main.
+    if: ${{ (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main') }}
+
     runs-on: ubuntu-latest
 
     defaults:
       run:
         working-directory: applications/havenbridge-api
+
+    # workflow_run:
+    #   release exactly the commit successfully tested by CI.
+    #
+    # workflow_dispatch:
+    #   release the main-branch commit associated with the manual run.
+    env:
+      RELEASE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+
     steps:
-      - name: Checkout repository
+      - name: Checkout release commit
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          ref: ${{ env.RELEASE_SHA }}
+
+      - name: Show release source
+        run: |
+          echo "Event:       ${{ github.event_name }}"
+          echo "Release SHA: ${RELEASE_SHA}"
+
       - name: Determine next semantic version
         id: version
         run: bash "$GITHUB_WORKSPACE/cicd/scripts/next-version.sh"
 
+      - name: Show semantic release decision
+        run: |
+          echo "Release needed: ${{ steps.version.outputs.release_needed }}"
+          echo "Release type:   ${{ steps.version.outputs.bump }}"
+          echo "Release tag:    ${{ steps.version.outputs.tag }}"
+
+      # Everything below this point runs only when next-version.sh
+      # determines that the HavenBridge application requires a new release.
+
       - name: Set up Python 3.12
+        if: steps.version.outputs.release_needed == 'true'
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Install Python dependencies
+        if: steps.version.outputs.release_needed == 'true'
         run: |
           python -m pip install --upgrade pip
           python -m pip install --requirement requirements-dev.txt
 
       - name: Run HavenBridge API tests
+        if: steps.version.outputs.release_needed == 'true'
         run: python -m pytest
 
       - name: Build HavenBridge API Docker image
+        if: steps.version.outputs.release_needed == 'true'
         run: |
           APP_VERSION="${{ steps.version.outputs.app_version }}"
 
           echo "Building HavenBridge API version ${APP_VERSION}"
+          echo "Release SHA: ${RELEASE_SHA}"
 
           docker build \
             --build-arg APP_VERSION="${APP_VERSION}" \
@@ -55,6 +106,7 @@ jobs:
             .
 
       - name: Install Kubeconform
+        if: steps.version.outputs.release_needed == 'true'
         run: |
           KUBECONFORM_VERSION="0.8.0"
           mkdir -p "$HOME/.local/bin"
@@ -68,6 +120,7 @@ jobs:
           "$HOME/.local/bin/kubeconform" -v
 
       - name: Validate HavenBridge Kubernetes manifests
+        if: steps.version.outputs.release_needed == 'true'
         run: |
           kubeconform \
             -strict \
@@ -78,6 +131,7 @@ jobs:
             "$GITHUB_WORKSPACE"/kubernetes/applications/havenbridge/backend/*.yaml
 
       - name: Log in to GitHub Container Registry
+        if: steps.version.outputs.release_needed == 'true'
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
@@ -85,6 +139,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Tag HavenBridge API release image
+        if: steps.version.outputs.release_needed == 'true'
         run: |
           docker tag \
             havenbridge-api:release \
@@ -92,17 +147,19 @@ jobs:
 
           docker tag \
             havenbridge-api:release \
-            ghcr.io/brunobrunt/havenbridge-api:${GITHUB_SHA}
+            ghcr.io/brunobrunt/havenbridge-api:${RELEASE_SHA}
 
       - name: Push HavenBridge API release images
+        if: steps.version.outputs.release_needed == 'true'
         run: |
           docker push \
             ghcr.io/brunobrunt/havenbridge-api:${{ steps.version.outputs.tag }}
 
           docker push \
-            ghcr.io/brunobrunt/havenbridge-api:${GITHUB_SHA}
+            ghcr.io/brunobrunt/havenbridge-api:${RELEASE_SHA}
 
       - name: Create and push Git release tag
+        if: steps.version.outputs.release_needed == 'true'
         run: |
           TAG="${{ steps.version.outputs.tag }}"
 

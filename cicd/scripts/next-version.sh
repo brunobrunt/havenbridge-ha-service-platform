@@ -30,6 +30,59 @@
 #
 #   docs:, test:, chore:, etc. do not create a release by themselves.
 #
+# Automated CI/CD release flow:
+#
+#   Developer
+#      |
+#      | git push
+#      v
+#   main
+#      |
+#      v
+#   HavenBridge CI
+#      |
+#      | tests / build / validation
+#      |
+#      +---- FAIL -----------------------> STOP
+#      |
+#      +---- PASS
+#             |
+#             v
+#      HavenBridge Release
+#             |
+#             | semantic version calculation
+#             |
+#             +---- docs / chore only
+#             |          |
+#             |          v
+#             |      no release
+#             |          |
+#             |          v
+#             |        STOP
+#             |
+#             +---- feat / fix / breaking change
+#                        |
+#                        v
+#                  new version / tag
+#                        |
+#                        v
+#                  HavenBridge CD
+#                        |
+#                        v
+#                  self-hosted runner
+#                        |
+#                        v
+#             restricted Kubernetes RBAC
+#                        |
+#                        v
+#                exact release image
+#                        |
+#                        v
+#                rollout + validation
+#
+# This script is responsible for the semantic-version decision inside the
+# HavenBridge Release stage. It does not perform CI or Kubernetes deployment.
+#
 # GitHub Actions uses the values written to GITHUB_OUTPUT later in this script.
 # ---------------------------------------------------------------------------
 
@@ -48,7 +101,11 @@ LATEST_TAG="$(
   echo "v0.0.0"
 )"
 
-# Read commits created after the last release.
+# Read application commits created after the last release.
+#
+# Restricting the Git log to applications/havenbridge-api means documentation,
+# infrastructure, observability, and CI/CD-only changes do not accidentally
+# create a HavenBridge API application version.
 COMMITS="$(
   git log \
     "${LATEST_TAG}..HEAD" \
@@ -56,7 +113,10 @@ COMMITS="$(
     -- applications/havenbridge-api
 )"
 
-# Split v0.5.0 into MAJOR=0, MINOR=5, PATCH=0.
+# Split a tag such as v0.7.0 into:
+#   MAJOR=0
+#   MINOR=7
+#   PATCH=0
 IFS='.' read -r MAJOR MINOR PATCH <<< "${LATEST_TAG#v}"
 
 if grep -Eq '^feat(\([^)]*\))?!:|^BREAKING CHANGE:' <<< "${COMMITS}"; then
@@ -75,8 +135,19 @@ elif grep -Eq '^fix(\([^)]*\))?:' <<< "${COMMITS}"; then
   BUMP="patch"
 
 else
-  echo "No release-causing commit found. Release stopped."
-  exit 1
+  echo "No release-causing commit found."
+  echo "No HavenBridge application release is required."
+
+  if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+    {
+      echo "release_needed=false"
+      echo "bump=none"
+      echo "tag="
+      echo "app_version="
+    } >> "${GITHUB_OUTPUT}"
+  fi
+
+  exit 0
 fi
 
 NEXT_TAG="v${MAJOR}.${MINOR}.${PATCH}"
@@ -85,8 +156,11 @@ echo "Latest release: ${LATEST_TAG}"
 echo "Release type:  ${BUMP}"
 echo "Next release:  ${NEXT_TAG}"
 
-{
-  echo "bump=${BUMP}"
-  echo "tag=${NEXT_TAG}"
-  echo "app_version=${NEXT_TAG#v}"
-} >> "${GITHUB_OUTPUT}"
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+  {
+    echo "release_needed=true"
+    echo "bump=${BUMP}"
+    echo "tag=${NEXT_TAG}"
+    echo "app_version=${NEXT_TAG#v}"
+  } >> "${GITHUB_OUTPUT}"
+fi
