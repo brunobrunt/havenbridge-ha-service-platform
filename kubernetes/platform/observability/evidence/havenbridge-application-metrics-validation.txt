@@ -234,12 +234,388 @@ Result:
 PASS
 
 
+Grafana Application Dashboard Validation
+----------------------------------------
+
+The validated HavenBridge Prometheus application metrics were used to build
+the Grafana dashboard:
+
+HavenBridge API — Application Overview
+
+Dashboard description:
+
+Operational overview of the HavenBridge API covering replica health,
+request rates, HTTP errors, response codes, route activity, and P95 latency
+using Prometheus metrics.
+
+The dashboard contains 11 application panels covering:
+
+1. HavenBridge API Replicas Up
+2. HavenBridge Application Request Rate
+3. HavenBridge Request Rate by Route
+4. HavenBridge HTTP 5xx Error Rate
+5. HavenBridge HTTP Responses by Status Code
+6. HavenBridge P95 Request Latency
+7. HavenBridge Request Rate by Replica
+8. HavenBridge P95 Latency by Route
+9. HavenBridge 5xx Error Percentage
+10. HavenBridge P95 Latency by Replica
+11. HavenBridge 4xx Error Percentage
+
+The dashboard uses the following primary HavenBridge metric families:
+
+havenbridge_http_requests_total
+havenbridge_http_request_duration_seconds
+
+Kubernetes liveness and readiness probe traffic is intentionally excluded
+from application-level Grafana traffic queries using:
+
+route!~"/health/(live|ready)"
+
+Result:
+
+PASS
+
+
+Controlled Traffic Validation
+-----------------------------
+
+Controlled traffic was generated from syrus to prove that Grafana correctly
+represented known HavenBridge API behavior.
+
+Successful HTTP requests:
+
+for i in {1..80}; do
+  curl -s https://havenbridge.lab/ > /dev/null
+done
+
+Intentional HTTP 404 requests:
+
+for i in {1..20}; do
+  curl -s https://havenbridge.lab/this-route-does-not-exist > /dev/null
+done
+
+Expected request distribution:
+
+80 successful requests
+20 intentional HTTP 404 requests
+100 total requests
+
+Expected HTTP 4xx percentage:
+
+20 / 100 * 100 = 20%
+
+Observed Grafana result:
+
+HavenBridge 4xx Error Percentage = 20%
+HavenBridge 5xx Error Percentage = 0%
+
+The route-level metrics also displayed:
+
+/
+unmatched
+
+The "unmatched" route label is intentionally used for unknown URLs instead
+of creating a unique Prometheus label for every invalid URL.
+
+This reduces unnecessary metric cardinality.
+
+Result:
+
+PASS
+
+
+Grafana Dashboard Export Validation
+-----------------------------------
+
+After the dashboard was manually built and validated, it was exported from
+Grafana.
+
+Dashboard:
+
+HavenBridge API — Application Overview
+
+Export format:
+
+apiVersion: dashboard.grafana.app/v2
+kind: Dashboard
+
+The exported JSON was validated with jq.
+
+Panel count:
+
+11
+
+All 11 panel titles were confirmed.
+
+All panel descriptions were confirmed.
+
+Visualization types were confirmed as:
+
+Stat:
+- HavenBridge API Replicas Up
+- HavenBridge 5xx Error Percentage
+- HavenBridge 4xx Error Percentage
+
+Time series:
+- HavenBridge Application Request Rate
+- HavenBridge Request Rate by Route
+- HavenBridge HTTP 5xx Error Rate
+- HavenBridge HTTP Responses by Status Code
+- HavenBridge P95 Request Latency
+- HavenBridge Request Rate by Replica
+- HavenBridge P95 Latency by Route
+- HavenBridge P95 Latency by Replica
+
+The Git-controlled dashboard JSON is stored at:
+
+kubernetes/platform/observability/grafana/dashboards/havenbridge-api-application-overview.json
+
+Full source path on syrus:
+
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/platform/observability/grafana/dashboards/havenbridge-api-application-overview.json
+
+Grafana-instance-specific metadata was removed from the Git-controlled copy.
+
+The retained dashboard metadata is:
+
+{
+  "name": "adt7sm7"
+}
+
+The following instance-specific metadata was intentionally removed:
+
+resourceVersion
+generation
+creationTimestamp
+deprecatedInternalID
+createdBy
+updatedBy
+updatedTimestamp
+
+Result:
+
+PASS
+
+
+Dashboard Kustomize Validation
+------------------------------
+
+Kustomize configuration:
+
+kubernetes/platform/observability/grafana/dashboards/kustomization.yaml
+
+Full source path on syrus:
+
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/platform/observability/grafana/dashboards/kustomization.yaml
+
+The Kustomization generates the Kubernetes ConfigMap:
+
+havenbridge-api-grafana-dashboard
+
+Namespace:
+
+observability
+
+Required Grafana dashboard sidecar label:
+
+grafana_dashboard=1
+
+Kustomize rendered the dashboard JSON into a ConfigMap successfully.
+
+Rendered manifest size:
+
+52K
+
+The rendered ConfigMap metadata contained:
+
+metadata:
+  labels:
+    grafana_dashboard: "1"
+  name: havenbridge-api-grafana-dashboard
+  namespace: observability
+
+Result:
+
+PASS
+
+
+Kubernetes Server-Side Validation
+---------------------------------
+
+Before applying the dashboard ConfigMap, Kubernetes server-side validation
+was performed.
+
+Command:
+
+kubectl apply \
+  --dry-run=server \
+  -f /tmp/havenbridge-grafana-dashboard-rendered.yaml
+
+Observed result:
+
+configmap/havenbridge-api-grafana-dashboard created (server dry run)
+
+This proved that the rendered Kubernetes object was accepted by the cluster
+API before any live change was made.
+
+Result:
+
+PASS
+
+
+Grafana Dashboard ConfigMap Deployment
+--------------------------------------
+
+The dashboard was deployed using:
+
+kubectl apply -k /tmp/havenbridge-grafana-dashboard
+
+Observed result:
+
+configmap/havenbridge-api-grafana-dashboard created
+
+The deployed ConfigMap was verified using:
+
+kubectl -n observability get configmap \
+  havenbridge-api-grafana-dashboard \
+  --show-labels
+
+Observed label:
+
+grafana_dashboard=1
+
+The dashboard JSON stored in the live ConfigMap was queried directly.
+
+Observed dashboard title:
+
+HavenBridge API — Application Overview
+
+Observed panel count:
+
+11
+
+Result:
+
+PASS
+
+
+Grafana Dashboard Sidecar Validation
+------------------------------------
+
+The kube-prometheus-stack Grafana deployment already contained the dashboard
+sidecar.
+
+Observed Grafana Pod containers:
+
+grafana-sc-dashboard
+grafana-sc-datasources
+grafana
+
+Effective dashboard sidecar configuration included:
+
+enabled: true
+label: grafana_dashboard
+labelValue: 1
+searchNamespace: ALL
+allowUiUpdates: false
+
+The Grafana dashboard sidecar detected the new ConfigMap.
+
+Observed sidecar log:
+
+Writing /tmp/dashboards/havenbridge-api-application-overview.json (ascii)
+
+The sidecar then requested a Grafana dashboard provisioning reload.
+
+Observed response:
+
+200 OK {"message":"Dashboards config reloaded"}
+
+No Grafana Pod restart was required.
+
+Result:
+
+PASS
+
+
+Grafana Browser Validation
+--------------------------
+
+The Grafana web interface was refreshed after dashboard provisioning.
+
+Dashboard:
+
+HavenBridge API — Application Overview
+
+All 11 application dashboard panels remained present and visible after
+provisioning.
+
+This confirmed that the dashboard successfully completed the full path:
+
+Git dashboard JSON
+        |
+        v
+Kustomize
+        |
+        v
+Kubernetes ConfigMap
+        |
+        v
+grafana-sc-dashboard
+        |
+        v
+Grafana provisioning reload
+        |
+        v
+HavenBridge API — Application Overview
+
+Result:
+
+PASS
+
+
+Dashboard Source-of-Truth Model
+-------------------------------
+
+The HavenBridge Grafana application dashboard is now managed as code.
+
+Previously:
+
+Grafana UI
+        |
+        v
+Manually created dashboard
+
+Current model:
+
+Git repository
+        |
+        v
+Dashboard JSON
+        |
+        v
+Kustomize
+        |
+        v
+Kubernetes ConfigMap
+        |
+        v
+Grafana dashboard sidecar
+        |
+        v
+Grafana
+
+The Git-controlled dashboard JSON should therefore be treated as the
+authoritative copy for permanent dashboard configuration changes.
+
+
 Final Validation Status
 -----------------------
 
 PASS
 
-The HavenBridge application metrics pipeline is operational:
+The complete HavenBridge application observability pipeline is operational:
 
 HavenBridge FastAPI
         |
@@ -256,35 +632,68 @@ Prometheus target discovery
 NetworkPolicy-authorized scrape
         |
         v
-Both replicas UP
+HavenBridge application metrics
         |
         v
-Custom HavenBridge metrics stored in Prometheus
+Grafana
+        |
+        v
+11-panel application dashboard
 
 
 Validated Components
 --------------------
 
-FastAPI /metrics endpoint                         PASS
-ServiceMonitor Kubernetes resource               PASS
+FastAPI /metrics endpoint                          PASS
+ServiceMonitor Kubernetes resource                PASS
 Prometheus ServiceMonitor discovery               PASS
 HavenBridge Service selection                     PASS
 Both HavenBridge API replicas discovered          PASS
 NetworkPolicy troubleshooting                     PASS
-Prometheus-to-API TCP 8000 authorization          PASS
+Prometheus-to-API TCP 8000 authorization           PASS
 Prometheus target health up=1                     PASS
 havenbridge_http_requests_total                    PASS
 havenbridge_http_request_duration_seconds_count    PASS
+Grafana 11-panel application dashboard             PASS
+Controlled HTTP 200 traffic validation             PASS
+Controlled HTTP 404 traffic validation             PASS
+Observed HTTP 4xx percentage = 20%                 PASS
+Observed HTTP 5xx percentage = 0%                  PASS
+Dashboard JSON export                              PASS
+Grafana V2 dashboard resource                      PASS
+Dashboard metadata cleanup                         PASS
+Dashboard JSON stored in Git                       PASS
+Kustomize ConfigMap generation                     PASS
+Kubernetes server-side dry-run                     PASS
+Dashboard ConfigMap deployment                     PASS
+grafana_dashboard=1 label                          PASS
+Grafana dashboard sidecar discovery                PASS
+Grafana provisioning reload 200 OK                 PASS
+All 11 panels present after provisioning           PASS
 
 
 Next Step
 ---------
 
-Use the validated HavenBridge application metrics to build Grafana
-application dashboards for:
+Observability Phase 4 — HavenBridge Application Metrics is functionally
+complete.
 
-- request traffic
-- HTTP errors
-- request latency
-- per-replica health
-- route-level behavior
+The next major observability capability is:
+
+Observability Phase 5 — Centralized Logging
+
+Planned logging architecture:
+
+HavenBridge + Kubernetes
+        |
+        v
+Container logs
+        |
+        v
+Grafana Alloy
+        |
+        v
+Loki
+        |
+        v
+Grafana
