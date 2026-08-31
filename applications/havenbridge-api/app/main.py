@@ -12,7 +12,7 @@ import logging
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 
 # Importing models registers SQLAlchemy table definitions with Base.metadata.
 # Without this import, create_all() would not know about service_inquiries.
@@ -159,3 +159,16 @@ def root() -> dict[str, str]:
         "readiness": "/health/ready",
     }
 # CI change-detection positive validation marker.
+
+
+# Temporary endpoint used to validate HTTP 5xx Prometheus/Grafana metrics.
+@app.get("/test/500", include_in_schema=False)
+def test_server_error() -> Response:
+    """
+    Return an intentional HTTP 500 response for observability testing.
+
+    This endpoint is temporary and will be removed after the Grafana
+    5xx error-rate and error-percentage panels are validated.
+    """
+
+    return Response(status_code=500)
