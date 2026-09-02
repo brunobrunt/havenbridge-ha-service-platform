@@ -7,7 +7,7 @@ handling, and registers the endpoint routers.
 Keeping the application entry point small makes the backend easier to test,
 maintain, containerize, and extend with additional HavenBridge features.
 """
-
+import os
 import logging
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
@@ -110,6 +110,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+ENABLE_OBSERVABILITY_TEST_ENDPOINTS = (
+    os.getenv("ENABLE_OBSERVABILITY_TEST_ENDPOINTS", "false").lower() == "true"
+)
+
 # Register Prometheus application metrics.
 #
 # This adds HTTP request instrumentation and exposes the /metrics endpoint
@@ -158,17 +162,17 @@ def root() -> dict[str, str]:
         "liveness": "/health/live",
         "readiness": "/health/ready",
     }
+
+
 # CI change-detection positive validation marker.
+# Controlled endpoint used for observability and alerting validation.
+# Disabled by default unless ENABLE_OBSERVABILITY_TEST_ENDPOINTS=true.
+if ENABLE_OBSERVABILITY_TEST_ENDPOINTS:
 
-
-# Temporary endpoint used to validate HTTP 5xx Prometheus/Grafana metrics.
-@app.get("/test/500", include_in_schema=False)
-def test_server_error() -> Response:
-    """
-    Return an intentional HTTP 500 response for observability testing.
-
-    This endpoint is temporary and will be removed after the Grafana
-    5xx error-rate and error-percentage panels are validated.
-    """
-
-    return Response(status_code=500)
+    @app.get("/test/500", include_in_schema=False)
+    def test_server_error() -> Response:
+        """
+        Return an intentional HTTP 500 response for controlled
+        observability and alerting validation.
+        """
+        return Response(status_code=500)
