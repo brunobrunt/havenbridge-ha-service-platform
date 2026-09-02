@@ -1929,43 +1929,429 @@ Prometheus
 Grafana
 ```
 
+## Observability Phase 5 — Centralized Logging
 
-## Current Next Step
+Observability Phase 5 introduces centralized Kubernetes and HavenBridge
+application logging.
 
-Observability Phase 4 — HavenBridge Application Metrics is functionally
-complete.
+The goal is to collect logs from workloads across the Kubernetes cluster,
+store them centrally, and make them searchable through Grafana.
 
-The next major observability capability is:
+The logging architecture is:
 
 ```text
-Observability Phase 5 — Centralized Logging
+Kubernetes + HavenBridge
+        |
+        +---- Metrics ----> Prometheus
+        |                     |
+        |                     v
+        |                  Grafana
+        |
+        +---- Logs -------> Grafana Alloy
+                              |
+                              v
+                            Loki
+                              |
+                              v
+                           Grafana
 ```
 
-The planned logging flow is:
+For the logging path specifically:
 
 ```text
-HavenBridge + Kubernetes
-        |
-        v
-container logs
-        |
-        v
+Kubernetes Pods
+      ↓
 Grafana Alloy
-        |
-        v
-Loki
-        |
-        v
-Grafana
+      ↓
+havenbridge-loki-gateway
+      ↓
+Monolithic Loki
+      ↓
+10Gi PersistentVolumeClaim
+      ↓
+havenbridge-nfs
 ```
 
-Grafana Alloy will collect logs and forward them to Loki.
+### Grafana Alloy
 
-Loki will store and query the logs.
+Grafana Alloy is the log collector.
 
-Grafana will provide a single interface where HavenBridge metrics and logs can
-be investigated together.
+In simple terms:
 
-Before Observability Phase 5 begins, the completed Observability Phase 4
-documentation, evidence, dashboard JSON, and Kustomize configuration will be
-committed and validated through the HavenBridge CI/CD workflow.
+```text
+Alloy = collects and delivers logs
+```
+
+Alloy runs as a Kubernetes DaemonSet so that one Alloy Pod runs on each
+Kubernetes node.
+
+Current deployment:
+
+```text
+eph-cp01       → Alloy
+eph-cp02       → Alloy
+eph-cp03       → Alloy
+eph-worker01   → Alloy
+eph-worker02   → Alloy
+```
+
+The three control-plane nodes use a `NoSchedule` taint, so Alloy includes an
+explicit toleration allowing the DaemonSet to run on those nodes.
+
+Each Alloy instance receives its node name through:
+
+```text
+spec.nodeName
+```
+
+and discovers only Pods running on that same node.
+
+This prevents multiple Alloy instances from collecting the same logs.
+
+Alloy uses:
+
+```text
+loki.source.kubernetes
+```
+
+to read Kubernetes Pod logs through the Kubernetes API.
+
+Useful Kubernetes metadata is converted into Loki labels including:
+
+```text
+namespace
+pod
+container
+node
+app
+cluster
+```
+
+The cluster label is:
+
+```text
+cluster="everpresence-haven"
+```
+
+### Alloy RBAC
+
+The default Alloy Helm chart rendered broader read permissions than required
+for the HavenBridge logging use case.
+
+Before installation, the permissions were reduced to read-only access to:
+
+```text
+pods
+pods/log
+namespaces
+```
+
+Allowed verbs are:
+
+```text
+get
+list
+watch
+```
+
+Alloy does not receive application resource modification permissions such as:
+
+```text
+create
+update
+patch
+delete
+```
+
+This keeps the log collector aligned with the HavenBridge least-privilege
+design.
+
+### Loki
+
+Grafana Loki is the centralized log storage and query backend.
+
+In simple terms:
+
+```text
+Loki = stores and searches logs
+```
+
+HavenBridge currently deploys Loki in Monolithic mode.
+
+This means the Loki read, write, query, and storage functions run together
+instead of being separated into multiple distributed Loki services.
+
+This design is appropriate for the current HavenBridge homelab because the
+expected logging volume does not require a distributed Loki architecture.
+
+Current versions:
+
+```text
+Loki Helm chart: 18.11.7
+Loki version:    3.7.7
+```
+
+### Loki Gateway
+
+Alloy sends logs to the Loki gateway rather than directly to the Loki Pod.
+
+The internal ingestion endpoint is:
+
+```text
+http://havenbridge-loki-gateway.observability.svc.cluster.local/loki/api/v1/push
+```
+
+The flow is:
+
+```text
+Alloy
+   ↓
+havenbridge-loki-gateway
+   ↓
+Loki
+```
+
+The gateway provides a stable Kubernetes Service endpoint for log ingestion.
+
+### Loki Persistent Storage
+
+Loki uses persistent storage so log data is not tied to the lifecycle of the
+Loki container.
+
+Current storage configuration:
+
+```text
+PVC:           storage-havenbridge-loki-0
+Capacity:      10Gi
+Access Mode:   ReadWriteOnce
+StorageClass:  havenbridge-nfs
+Status:        Bound
+```
+
+Storage flow:
+
+```text
+Loki StatefulSet
+      ↓
+PVC
+      ↓
+havenbridge-nfs StorageClass
+      ↓
+NFS-backed PersistentVolume
+```
+
+Loki currently uses:
+
+```text
+TSDB
+filesystem object storage
+schema v13
+replication_factor: 1
+```
+
+### Loki Validation
+
+Before Alloy was introduced, Loki was validated independently.
+
+The Loki readiness endpoint returned:
+
+```text
+HTTP/1.1 200 OK
+ready
+```
+
+A manual validation log was then pushed to Loki:
+
+```text
+HavenBridge Loki manual validation log
+```
+
+The log was successfully queried back using LogQL.
+
+This proved that Loki could:
+
+```text
+receive logs
+store logs
+query logs
+return logs
+```
+
+before introducing the automatic log collector.
+
+### Alloy Installation Validation
+
+The Alloy Helm configuration was validated before installation using:
+
+```text
+helm template
+        ↓
+rendered Kubernetes YAML
+        ↓
+RBAC inspection
+        ↓
+Kubernetes server-side dry run
+        ↓
+Helm installation
+```
+
+The final DaemonSet successfully deployed one Alloy Pod on every Kubernetes
+node.
+
+All five Alloy Pods reported:
+
+```text
+READY:    2/2
+STATUS:   Running
+RESTARTS: 0
+```
+
+### End-to-End Log Pipeline Validation
+
+Alloy logs confirmed that Kubernetes Pod log streams were being opened.
+
+Examples included workloads from:
+
+```text
+havenbridge
+observability
+kube-system
+```
+
+The Loki gateway then showed requests such as:
+
+```text
+POST /loki/api/v1/push HTTP/1.1
+HTTP status: 204
+User-Agent: Alloy/v1.19.2
+```
+
+HTTP `204` confirms that Loki successfully accepted logs sent by Alloy.
+
+Log pushes were observed from Alloy instances across all five Kubernetes
+nodes.
+
+### HavenBridge Application Log Validation
+
+The following LogQL query successfully returned real HavenBridge application
+logs:
+
+```text
+{namespace="havenbridge"}
+```
+
+Returned streams included metadata such as:
+
+```text
+app="havenbridge-api"
+namespace="havenbridge"
+cluster="everpresence-haven"
+node="eph-worker01"
+node="eph-worker02"
+```
+
+Example application logs included:
+
+```text
+GET /health/live HTTP/1.1" 200 OK
+GET /health/ready HTTP/1.1" 200 OK
+GET /metrics HTTP/1.1" 200 OK
+```
+
+This validates the complete path:
+
+```text
+HavenBridge API
+      ↓
+container logs
+      ↓
+Grafana Alloy
+      ↓
+Loki Gateway
+      ↓
+Loki
+      ↓
+LogQL
+```
+
+### Observability Platform Log Validation
+
+Logs from the observability namespace were also successfully queried:
+
+```text
+{namespace="observability"}
+```
+
+Returned workloads included:
+
+```text
+Grafana
+Loki
+Loki Gateway
+```
+
+This demonstrates that the logging platform can also observe its own
+components.
+
+### Installation Connectivity Incident
+
+During the initial Alloy Helm installation attempt, connectivity to the
+Kubernetes API VIP was temporarily lost.
+
+Observed errors included:
+
+```text
+http2: client connection lost
+connect: no route to host
+```
+
+The affected endpoint was:
+
+```text
+k8s-api.lab
+172.16.10.30:6443
+```
+
+The issue was related to Kubernetes API VIP/network connectivity rather than
+the Alloy configuration itself.
+
+The installation subsequently completed successfully.
+
+This provides an important troubleshooting distinction:
+
+```text
+Application configuration failure
+        ≠
+Kubernetes control-plane connectivity failure
+```
+
+### Current Phase 5 Status
+
+```text
+Loki Helm deployment                    PASS
+Monolithic Loki                         PASS
+10Gi persistent storage                 PASS
+havenbridge-nfs storage                 PASS
+Loki readiness                          PASS
+Manual Loki ingestion                   PASS
+Manual LogQL retrieval                  PASS
+Alloy DaemonSet                         PASS
+Alloy on all five nodes                 PASS
+Control-plane toleration                PASS
+Least-privilege Alloy RBAC              PASS
+Kubernetes Pod discovery                PASS
+Pod log streaming                       PASS
+Kubernetes metadata labels              PASS
+Alloy → Loki Gateway                    PASS
+Loki HTTP 204 ingestion                 PASS
+HavenBridge application log retrieval   PASS
+Observability platform log retrieval    PASS
+```
+### Phase 5 Completion
+
+Grafana Loki datasource provisioning has now been completed.
+
+Grafana successfully connects to Loki through:
+
+```text
+http://havenbridge-loki-gateway.observability.svc.cluster.local/

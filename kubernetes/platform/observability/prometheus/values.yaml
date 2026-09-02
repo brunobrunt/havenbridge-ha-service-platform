@@ -21,6 +21,18 @@ grafana:
   ingress:
     enabled: false
 
+  # Provision Loki automatically as an additional Grafana datasource.
+  #
+  # Prometheus remains the default datasource for metrics.
+  # Loki provides centralized Kubernetes and HavenBridge logs.
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      uid: loki
+      url: http://havenbridge-loki-gateway.observability.svc.cluster.local/
+      access: proxy
+      isDefault: false
+
   resources:
     requests:
       cpu: 100m

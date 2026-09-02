@@ -1,0 +1,140 @@
+# HavenBridge Loki configuration.
+#
+# Loki is deployed in Monolithic mode because the HavenBridge homelab
+# currently has a small log volume and does not require a distributed
+# Loki architecture.
+
+deploymentMode: Monolithic
+
+
+loki:
+  # HavenBridge currently runs Loki as a single-tenant internal service.
+  auth_enabled: false
+
+  # A single Loki replica requires a replication factor of 1.
+  commonConfig:
+    replication_factor: 1
+
+  # TSDB with schema v13 is the recommended storage schema for new Loki
+  # installations.
+  schemaConfig:
+    configs:
+      - from: "2024-04-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+
+  # Store Loki chunks and index data on the Loki filesystem.
+  # The filesystem itself will live on the persistent Kubernetes PVC.
+  storage:
+    type: filesystem
+
+
+singleBinary:
+  # Run one Loki process containing all Loki components.
+  replicas: 1
+
+  persistence:
+    enabled: true
+
+    # HavenBridge NFS CSI dynamic StorageClass.
+    storageClass: havenbridge-nfs
+
+    accessModes:
+      - ReadWriteOnce
+
+    size: 10Gi
+
+    # Do not automatically remove Loki's PVC if the StatefulSet is
+    # deleted or scaled down.
+    enableStatefulSetAutoDeletePVC: false
+    whenDeleted: Retain
+    whenScaled: Retain
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+
+
+# The default Loki chart enables an 8 GiB Memcached chunks cache.
+# That is unnecessary and too large for the HavenBridge homelab.
+chunksCache:
+  enabled: false
+
+
+# Disable the additional Memcached query-results cache initially.
+resultsCache:
+  enabled: false
+
+
+# We will validate log delivery using Grafana Alloy rather than deploying
+# an additional Loki Canary DaemonSet on every Kubernetes node.
+lokiCanary:
+  enabled: false
+
+# The Loki Helm test depends on Loki Canary.
+# Since HavenBridge intentionally disables Loki Canary and will validate
+# log delivery with Grafana Alloy, disable the chart test as well.
+test:
+  enabled: false
+
+
+# Keep the Loki gateway as the stable internal endpoint used by Alloy
+# and Grafana.
+gateway:
+  enabled: true
+
+
+# No built-in MinIO is required because HavenBridge is using filesystem
+# storage backed by its existing persistent volume.
+minio:
+  enabled: false
+
+
+# Explicitly disable workloads belonging to other Loki deployment modes.
+
+backend:
+  replicas: 0
+
+read:
+  replicas: 0
+
+write:
+  replicas: 0
+
+ingester:
+  replicas: 0
+
+querier:
+  replicas: 0
+
+queryFrontend:
+  replicas: 0
+
+queryScheduler:
+  replicas: 0
+
+distributor:
+  replicas: 0
+
+compactor:
+  replicas: 0
+
+indexGateway:
+  replicas: 0
+
+bloomPlanner:
+  replicas: 0
+
+bloomBuilder:
+  replicas: 0
+
+bloomGateway:
+  replicas: 0
