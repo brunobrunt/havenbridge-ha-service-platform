@@ -638,6 +638,19 @@ Detailed commands and troubleshooting steps are recorded in:
 /home/alabi/projects/havenbridge-ha-service-platform/kubernetes/platform/runbooks/havenbridge-api-postgresql-validation.txt
 ```
 
+## Controlled Observability Test Endpoint
+
+HavenBridge includes a controlled HTTP 500 endpoint for observability,
+alerting, and incident-simulation testing.
+
+The endpoint is disabled by default.
+
+```text
+ENABLE_OBSERVABILITY_TEST_ENDPOINTS=false
+        ↓
+/test/500 unavailable
+
+
 ### Next Application Step
 #
 #The next step is to:
