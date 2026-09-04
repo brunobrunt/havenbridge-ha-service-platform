@@ -1,0 +1,60 @@
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+
+metadata:
+  name: havenbridge-notifications
+  namespace: observability
+
+spec:
+  route:
+    receiver: havenbridge-notifications
+    groupBy:
+      - alertname
+      - severity
+    groupWait: 10s
+    groupInterval: 5m
+    repeatInterval: 4h
+
+    matchers:
+      - name: alertname
+        matchType: =~
+        value: "HavenBridge.*"
+
+  receivers:
+    - name: havenbridge-notifications
+
+      discordConfigs:
+        - apiURL:
+            name: havenbridge-discord-webhook
+            key: webhook-url
+
+          sendResolved: true
+          username: "HavenBridge Alertmanager"
+
+          title: '{{ .CommonLabels.alertname }} - {{ .Status }}'
+
+          message: |
+            Severity: {{ .CommonLabels.severity }}
+
+            {{ range .Alerts }}
+            Summary: {{ .Annotations.summary }}
+            Description: {{ .Annotations.description }}
+            {{ end }}
+
+      slackConfigs:
+        - apiURL:
+            name: havenbridge-slack-webhook
+            key: webhook-url
+
+          sendResolved: true
+          username: "HavenBridge Alertmanager"
+
+          title: '{{ .CommonLabels.alertname }} - {{ .Status }}'
+
+          text: |
+            Severity: {{ .CommonLabels.severity }}
+
+            {{ range .Alerts }}
+            *Summary:* {{ .Annotations.summary }}
+            *Description:* {{ .Annotations.description }}
+            {{ end }}

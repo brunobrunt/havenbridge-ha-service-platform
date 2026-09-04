@@ -2355,3 +2355,251 @@ Grafana successfully connects to Loki through:
 
 ```text
 http://havenbridge-loki-gateway.observability.svc.cluster.local/
+```
+
+## Observability Phase 6 — Alerting
+
+HavenBridge uses Prometheus alert rules and Alertmanager to detect
+application availability, error-rate, and performance problems and
+deliver operational notifications.
+
+### Alerting Architecture
+
+```text
+HavenBridge metrics
+        ↓
+Prometheus
+        ↓
+Alert Rules
+        ↓
+Alertmanager
+        ↓
+havenbridge-notifications
+        ├── Discord #havenbridge-alerts
+        └── Slack   #havenbridge-alerts
+```
+
+```
+
+### Alert Rule Files
+
+HavenBridge-specific alert rules are defined in:
+
+```text
+kubernetes/platform/observability/prometheus/havenbridge-alerts.yaml
+```
+
+Alertmanager notification routing is defined in:
+
+```text
+kubernetes/platform/observability/prometheus/havenbridge-alertmanager-config.yaml
+```
+
+Discord and Slack webhook URLs are stored in Kubernetes Secrets
+and are not committed to Git:
+
+```text
+havenbridge-discord-webhook
+havenbridge-slack-webhook
+```
+
+### HavenBridgeAPIUnavailable
+
+Check the HavenBridge API targets.
+
+If:
+
+```text
+every API target is down
+```
+
+or:
+
+```text
+Prometheus cannot find the API targets at all
+```
+
+and the problem lasts at least 2 minutes,
+
+fire:
+
+```text
+HavenBridgeAPIUnavailable
+```
+
+with severity:
+
+```text
+critical
+```
+
+The alert expression is:
+
+```promql
+sum(up{namespace="havenbridge", service="havenbridge-api"}) == 0
+or
+absent(up{namespace="havenbridge", service="havenbridge-api"})
+```
+
+The `absent()` condition is important because when all API replicas
+disappear, Prometheus may have no target metrics rather than targets
+reporting `up = 0`.
+
+### HavenBridgeHigh5xxErrorRate
+
+Look at HavenBridge application requests over the last 5 minutes.
+
+Calculate:
+
+```text
+HTTP 5xx requests
+----------------- × 100
+all application requests
+```
+
+Health probe traffic is excluded.
+
+If:
+
+```text
+5xx error percentage > 5%
+```
+
+and there is actual application traffic,
+
+and the condition stays true for at least 2 minutes,
+
+fire:
+
+```text
+HavenBridgeHigh5xxErrorRate
+```
+
+with severity:
+
+```text
+warning
+```
+
+The rule uses:
+
+```promql
+or vector(0)
+```
+
+so that when there are no 5xx responses, the error side can be
+treated as zero instead of missing data.
+
+It also verifies that request traffic is greater than zero so an idle
+application does not generate a false high-error alert.
+
+### HavenBridgeHighP95Latency
+
+Look at HavenBridge requests over the last 5 minutes.
+
+Find the latency below which 95% of requests completed.
+
+If:
+
+```text
+P95 latency > 500 ms
+```
+
+and it stays that way for at least 2 minutes,
+
+fire:
+
+```text
+HavenBridgeHighP95Latency
+```
+
+with severity:
+
+```text
+warning
+```
+
+The histogram stores duration in seconds, therefore:
+
+```text
+0.5 seconds = 500 milliseconds
+```
+
+During normal validation, HavenBridge P95 latency was approximately:
+
+```text
+4.75 ms
+```
+
+### Alert State Lifecycle
+
+Prometheus alerts normally transition through:
+
+```text
+inactive
+    ↓ condition becomes true
+pending
+    ↓ condition remains true for 2 minutes
+firing
+```
+
+After the monitored condition recovers:
+
+```text
+firing
+    ↓
+inactive
+```
+
+### Notification Delivery
+
+Alertmanager routes HavenBridge alerts through:
+
+```text
+havenbridge-notifications
+```
+
+The receiver sends notifications to:
+
+```text
+Discord #havenbridge-alerts
+Slack   #havenbridge-alerts
+```
+
+Both integrations use:
+
+```text
+sendResolved: true
+```
+
+so operators receive both incident and recovery notifications.
+
+### Alerting Validation
+
+Observability Phase 6 validation included:
+
+- Prometheus rule loading and health validation
+- negative and positive 5xx PromQL testing
+- controlled HTTP 500 generation
+- `inactive → pending → firing` validation
+- controlled API outage using `2 → 0` replicas
+- HTTP 503 validation during the outage
+- Alertmanager receipt of warning and critical alerts
+- Discord firing and resolved notification delivery
+- Slack firing and resolved notification delivery
+- application recovery to `2/2` API replicas
+- confirmation that both API scrape targets returned `up = 1`
+
+Detailed validation commands and troubleshooting evidence are stored in:
+
+```text
+kubernetes/platform/observability/evidence/havenbridge-alerting-validation.txt
+```
+
+### HavenBridge Alerts
+
+| Alert | Severity | Purpose |
+|---|---|---|
+| `HavenBridgeAPIUnavailable` | critical | Detects when all HavenBridge API targets are unavailable or disappear |
+| `HavenBridgeHigh5xxErrorRate` | warning | Detects when HTTP 5xx responses exceed 5% of application traffic |
+| `HavenBridgeHighP95Latency` | warning | Detects when P95 request latency exceeds 500 ms |

@@ -1,0 +1,813 @@
+HavenBridge Observability Phase 6 — Alerting Validation
+=======================================================
+
+Custom HavenBridge Alerts
+-------------------------
+
+HavenBridgeAPIUnavailable
+Severity: critical
+
+HavenBridgeHigh5xxErrorRate
+Severity: warning
+
+HavenBridgeHighP95Latency
+Severity: warning
+
+
+Prometheus Rule Validation
+--------------------------
+
+All HavenBridge rules loaded successfully:
+
+HavenBridgeAPIUnavailable        inactive   ok
+HavenBridgeHigh5xxErrorRate      inactive   ok
+HavenBridgeHighP95Latency        inactive   ok
+
+Prometheus configuration reload:
+
+reloadConfigSuccess: true
+
+
+HTTP 5xx Alert Validation
+-------------------------
+
+Controlled endpoint enabled:
+
+ENABLE_OBSERVABILITY_TEST_ENDPOINTS=true
+
+Controlled HTTP 500 traffic caused:
+
+HavenBridgeHigh5xxErrorRate
+inactive -> pending -> firing
+
+Severity:
+
+warning
+
+Prometheus firing state was confirmed.
+
+Alertmanager received:
+
+HavenBridgeHigh5xxErrorRate    active    warning
+
+After disabling the controlled endpoint and allowing the
+5-minute metrics window to expire, the alert returned to:
+
+HavenBridgeHigh5xxErrorRate    inactive    ok
+
+The controlled endpoint was verified disabled:
+
+HTTP/2 404
+
+
+API Availability Alert Validation
+---------------------------------
+
+HavenBridge API deployment was intentionally scaled:
+
+2 replicas -> 0 replicas
+
+External application response:
+
+HTTP/2 503
+no available server
+
+Prometheus detected the outage:
+
+HavenBridgeAPIUnavailable
+inactive -> pending -> firing
+
+Severity:
+
+critical
+
+Alertmanager received:
+
+HavenBridgeAPIUnavailable    active    critical
+
+The application was restored:
+
+0 replicas -> 2 replicas
+
+Deployment validation:
+
+READY: 2/2
+
+External validation:
+
+HTTP/2 200
+
+Prometheus recovery:
+
+HavenBridgeAPIUnavailable    inactive    ok
+
+Alertmanager no longer contained the active availability alert.
+
+
+Discord Notification Validation
+-------------------------------
+
+Discord server:
+
+HavenBridge
+
+Channel:
+
+#havenbridge-alerts
+
+Receiver:
+
+HavenBridge Alertmanager
+
+The Discord webhook is stored in Kubernetes Secret:
+
+havenbridge-discord-webhook
+
+Namespace:
+
+observability
+
+The webhook URL is not stored in Git.
+
+Initial Discord delivery failed with:
+
+HTTP 404
+
+Alertmanager reported:
+
+integration="discord"
+reason="clientError"
+
+Root cause:
+
+The Discord webhook URL had accidentally been stored twice
+inside the Kubernetes Secret.
+
+Validation showed:
+
+Discord webhook URL prefix count: 2
+HTTP status: 404
+
+The Secret was corrected.
+
+Validation after correction:
+
+Discord webhook URL prefix count: 1
+HTTP status: 204
+
+A direct webhook connectivity message successfully appeared
+in #havenbridge-alerts.
+
+
+Alertmanager to Discord Validation
+----------------------------------
+
+A synthetic alert was submitted directly to Alertmanager:
+
+HavenBridgeDiscordTest
+
+Discord successfully received:
+
+HavenBridgeDiscordTest - firing
+
+Severity: warning
+
+After resolving the synthetic alert, Discord received:
+
+HavenBridgeDiscordTest - resolved
+
+
+Real HavenBridge Alert Delivery
+-------------------------------
+
+The controlled HavenBridge API outage also produced real
+Discord notifications:
+
+HavenBridgeAPIUnavailable - firing
+Severity: critical
+
+After restoring the API:
+
+HavenBridgeAPIUnavailable - resolved
+Severity: critical
+
+Slack and Multi-Channel Notification Validation
+-----------------------------------------------
+
+Slack workspace:
+
+HavenBridge
+
+Channel:
+
+#havenbridge-alerts
+
+Slack application:
+
+HavenBridge Alertmanager
+
+The Slack webhook is stored in Kubernetes Secret:
+
+havenbridge-slack-webhook
+
+Namespace:
+
+observability
+
+The webhook URL is not stored in Git.
+
+Direct Slack webhook connectivity was validated successfully:
+
+HTTP status: 200
+
+A test message appeared successfully in:
+
+#havenbridge-alerts
+
+
+AlertmanagerConfig Naming
+-------------------------
+
+The original AlertmanagerConfig was named:
+
+havenbridge-discord
+
+After Slack was added, the resource was renamed to:
+
+havenbridge-notifications
+
+This better represents the purpose of the configuration because
+the same receiver now delivers notifications to multiple channels.
+
+Generated Alertmanager configuration confirmed:
+
+havenbridge-notifications
+slack_configs
+discord_configs
+
+
+Multi-Channel Alert Delivery
+----------------------------
+
+A synthetic alert was submitted directly to Alertmanager:
+
+HavenBridgeNotificationTest
+
+The same firing notification was successfully delivered to:
+
+Discord #havenbridge-alerts
+Slack   #havenbridge-alerts
+
+Notification:
+
+HavenBridgeNotificationTest - firing
+
+Severity:
+
+warning
+
+The synthetic alert was then resolved.
+
+Alertmanager no longer returned the active synthetic alert.
+
+The resolved notification was delivered to:
+
+Discord #havenbridge-alerts
+Slack   #havenbridge-alerts
+
+Notification:
+
+HavenBridgeNotificationTest - resolved
+
+This validated the complete multi-channel notification path:
+
+Prometheus / Alertmanager
+        |
+        +---- Discord
+        |
+        +---- Slack
+
+
+Final Platform State
+--------------------
+
+HavenBridge API:
+
+HTTP/2 200
+
+Kubernetes:
+
+2/2 API replicas Ready
+
+Prometheus scrape targets:
+
+2 HavenBridge API targets
+up = 1
+up = 1
+
+Prometheus alert rules:
+
+HavenBridgeAPIUnavailable        inactive   ok
+HavenBridgeHigh5xxErrorRate      inactive   ok
+HavenBridgeHighP95Latency        inactive   ok
+
+Grafana application metrics restored successfully.
+
+Discord firing and resolved notification delivery validated.
+
+
+Validation and Troubleshooting Commands Used
+--------------------------------------------
+
+The following commands were used during Observability Phase 6 to
+validate Prometheus alert expressions, alert state transitions,
+Alertmanager delivery, application recovery, and Discord
+notification delivery.
+
+
+1. Check HavenBridge Application Request Rate
+---------------------------------------------
+
+curl -sG \
+  http://127.0.0.1:9090/api/v1/query \
+  --data-urlencode 'query=sum(rate(havenbridge_http_requests_total{namespace="havenbridge",route!~"/health/(live|ready)"}[5m]))' \
+  | jq '.data.result'
+
+
+2. Generate Normal HavenBridge Traffic
+--------------------------------------
+
+for i in {1..20}; do
+  curl -s https://havenbridge.lab/ > /dev/null
+done
+
+
+3. Test High 5xx Alert PromQL
+-----------------------------
+
+curl -sG \
+  http://127.0.0.1:9090/api/v1/query \
+  --data-urlencode 'query=(
+    100 *
+    (
+      sum(
+        rate(
+          havenbridge_http_requests_total{
+            namespace="havenbridge",
+            status_code=~"5..",
+            route!~"/health/(live|ready)"
+          }[5m]
+        )
+      )
+      or vector(0)
+    )
+    /
+    sum(
+      rate(
+        havenbridge_http_requests_total{
+          namespace="havenbridge",
+          route!~"/health/(live|ready)"
+        }[5m]
+      )
+    )
+  ) > 5
+  and
+  sum(
+    rate(
+      havenbridge_http_requests_total{
+        namespace="havenbridge",
+        route!~"/health/(live|ready)"
+      }[5m]
+    )
+  ) > 0' \
+  | jq '.data.result'
+
+
+4. Verify Controlled HTTP 500 Endpoint
+--------------------------------------
+
+When enabled:
+
+curl -i https://havenbridge.lab/test/500
+
+Expected:
+
+HTTP/2 500
+
+When disabled:
+
+curl -i https://havenbridge.lab/test/500
+
+Expected:
+
+HTTP/2 404
+
+
+5. Generate Controlled 5xx Traffic
+----------------------------------
+
+for i in {1..20}; do
+  curl -s https://havenbridge.lab/ > /dev/null
+done
+
+for i in {1..20}; do
+  curl -s https://havenbridge.lab/test/500 > /dev/null
+done
+
+
+6. Check Current P95 Latency
+----------------------------
+
+curl -sG \
+  http://127.0.0.1:9090/api/v1/query \
+  --data-urlencode 'query=1000 * histogram_quantile(
+    0.95,
+    sum by (le) (
+      rate(
+        havenbridge_http_request_duration_seconds_bucket{
+          namespace="havenbridge",
+          route!~"/health/(live|ready)"
+        }[5m]
+      )
+    )
+  )' \
+  | jq '.data.result'
+
+Observed normal P95 during validation:
+
+4.75 ms
+
+
+7. Test P95 Alert PromQL
+------------------------
+
+curl -sG \
+  http://127.0.0.1:9090/api/v1/query \
+  --data-urlencode 'query=histogram_quantile(
+    0.95,
+    sum by (le) (
+      rate(
+        havenbridge_http_request_duration_seconds_bucket{
+          namespace="havenbridge",
+          route!~"/health/(live|ready)"
+        }[5m]
+      )
+    )
+  ) > 0.5' \
+  | jq '.data.result'
+
+An empty result confirmed normal latency was below the
+500 ms alert threshold.
+
+
+8. List HavenBridge Prometheus Alert Rules
+------------------------------------------
+
+curl -s http://127.0.0.1:9090/api/v1/rules \
+  | jq -r '
+      .data.groups[].rules[]
+      | select(.name | contains("HavenBridge"))
+      | [.name, .state, .health]
+      | @tsv
+    '
+
+Memory pattern:
+
+RULES -> FILTER -> FIELDS
+
+
+9. Inspect HavenBridge Alert Rule Group
+---------------------------------------
+
+curl -s http://127.0.0.1:9090/api/v1/rules \
+  | jq '
+      .data.groups[]
+      | select(.name=="havenbridge-api.rules")
+      | {
+          file,
+          name,
+          rules: [.rules[] | {name, state, health, lastError}]
+        }
+    '
+
+
+10. Check Prometheus Reload Status
+----------------------------------
+
+curl -s http://127.0.0.1:9090/api/v1/status/runtimeinfo \
+  | jq '.data | {reloadConfigSuccess, lastConfigTime}'
+
+
+11. Check High 5xx Alert State in Prometheus
+--------------------------------------------
+
+curl -s http://127.0.0.1:9090/api/v1/alerts \
+  | jq -r '
+      .data.alerts[]
+      | select(.labels.alertname=="HavenBridgeHigh5xxErrorRate")
+      | [.labels.alertname, .state, .labels.severity, .activeAt]
+      | @tsv
+    '
+
+This command was used to observe:
+
+pending -> firing
+
+
+12. Check API Unavailable Alert State in Prometheus
+---------------------------------------------------
+
+curl -s http://127.0.0.1:9090/api/v1/alerts \
+  | jq -r '
+      .data.alerts[]
+      | select(.labels.alertname=="HavenBridgeAPIUnavailable")
+      | [.labels.alertname, .state, .labels.severity, .activeAt]
+      | @tsv
+    '
+
+
+13. Verify Alertmanager Readiness
+---------------------------------
+
+curl -sS http://127.0.0.1:9093/-/ready; echo
+
+Expected:
+
+OK
+
+Important:
+
+This means Alertmanager itself is healthy.
+It does not mean the HavenBridge API is healthy.
+
+
+14. Verify High 5xx Alert Reached Alertmanager
+----------------------------------------------
+
+curl -s http://127.0.0.1:9093/api/v2/alerts \
+  | jq -r '
+      .[]
+      | select(.labels.alertname=="HavenBridgeHigh5xxErrorRate")
+      | [.labels.alertname, .status.state, .labels.severity, .startsAt]
+      | @tsv
+    '
+
+
+15. Verify API Unavailable Alert Reached Alertmanager
+-----------------------------------------------------
+
+curl -s http://127.0.0.1:9093/api/v2/alerts \
+  | jq -r '
+      .[]
+      | select(.labels.alertname=="HavenBridgeAPIUnavailable")
+      | [.labels.alertname, .status.state, .labels.severity, .startsAt]
+      | @tsv
+    '
+
+
+16. Verify Alert Recovery in Prometheus
+---------------------------------------
+
+curl -s http://127.0.0.1:9090/api/v1/alerts \
+  | jq -r '
+      .data.alerts[]
+      | select(.labels.alertname=="HavenBridgeHigh5xxErrorRate")
+      | [.labels.alertname, .state, .labels.severity]
+      | @tsv
+    '
+
+No output means the alert is no longer active.
+
+
+17. Verify HavenBridge API Recovery
+-----------------------------------
+
+curl -i https://havenbridge.lab/
+
+Expected:
+
+HTTP/2 200
+
+
+18. Verify Prometheus Scrapes Both API Replicas
+-----------------------------------------------
+
+curl -sG \
+  http://127.0.0.1:9090/api/v1/query \
+  --data-urlencode 'query=up{namespace="havenbridge",service="havenbridge-api"}' \
+  | jq '.data.result'
+
+Expected:
+
+Two HavenBridge API targets with:
+
+"value": [..., "1"]
+
+
+19. Validate Discord Webhook URL Was Not Duplicated
+--------------------------------------------------
+
+DISCORD_WEBHOOK_URL=$(kubectl -n observability get secret \
+  havenbridge-discord-webhook \
+  -o jsonpath='{.data.webhook-url}' | base64 -d)
+
+printf '%s' "$DISCORD_WEBHOOK_URL" \
+  | grep -o 'https://discord.com/api/webhooks/' \
+  | wc -l
+
+Expected:
+
+1
+
+The initial incorrect Secret returned:
+
+2
+
+
+20. Direct Discord Webhook Connectivity Test
+--------------------------------------------
+
+curl -sS \
+  -o /dev/null \
+  -w 'HTTP status: %{http_code}\n' \
+  -H 'Content-Type: application/json' \
+  -d '{"content":"HavenBridge webhook connectivity test"}' \
+  "$DISCORD_WEBHOOK_URL"
+
+Expected:
+
+HTTP status: 204
+
+HTTP 204 confirms Discord accepted the webhook POST.
+
+After testing:
+
+unset DISCORD_WEBHOOK_URL
+
+
+21. Submit Synthetic Firing Alert to Alertmanager
+-------------------------------------------------
+
+STARTS_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+ENDS_AT=$(date -u -d '+10 minutes' +"%Y-%m-%dT%H:%M:%SZ")
+
+curl -sS -X POST \
+  -H 'Content-Type: application/json' \
+  -d "[
+    {
+      \"labels\": {
+        \"alertname\": \"HavenBridgeDiscordTest\",
+        \"severity\": \"warning\"
+      },
+      \"annotations\": {
+        \"summary\": \"HavenBridge Discord notification test\",
+        \"description\": \"Synthetic alert sent directly to Alertmanager to validate Discord delivery.\"
+      },
+      \"startsAt\": \"$STARTS_AT\",
+      \"endsAt\": \"$ENDS_AT\"
+    }
+  ]" \
+  http://127.0.0.1:9093/api/v2/alerts
+
+Discord received:
+
+HavenBridgeDiscordTest - firing
+
+
+22. Resolve Synthetic Alert
+---------------------------
+
+ENDS_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+curl -sS -X POST \
+  -H 'Content-Type: application/json' \
+  -d "[
+    {
+      \"labels\": {
+        \"alertname\": \"HavenBridgeDiscordTest\",
+        \"severity\": \"warning\"
+      },
+      \"annotations\": {
+        \"summary\": \"HavenBridge Discord notification test\",
+        \"description\": \"Synthetic alert sent directly to Alertmanager to validate Discord delivery.\"
+      },
+      \"startsAt\": \"$STARTS_AT\",
+      \"endsAt\": \"$ENDS_AT\"
+    }
+  ]" \
+  http://127.0.0.1:9093/api/v2/alerts
+
+
+23. Verify Synthetic Alert Cleared from Alertmanager
+----------------------------------------------------
+
+curl -s http://127.0.0.1:9093/api/v2/alerts \
+  | jq -r '
+      .[]
+      | select(.labels.alertname=="HavenBridgeDiscordTest")
+      | [.labels.alertname, .status.state, .labels.severity]
+      | @tsv
+    '
+
+No output confirmed the synthetic alert had resolved.
+
+Discord subsequently received:
+
+HavenBridgeDiscordTest - resolved
+
+24. Validate Slack Webhook URL
+------------------------------
+
+SLACK_WEBHOOK_URL=$(kubectl -n observability get secret \
+  havenbridge-slack-webhook \
+  -o jsonpath='{.data.webhook-url}' | base64 -d)
+
+printf '%s' "$SLACK_WEBHOOK_URL" \
+  | grep -o 'https://hooks.slack.com/services/' \
+  | wc -l
+
+Expected:
+
+1
+
+
+25. Direct Slack Webhook Connectivity Test
+------------------------------------------
+
+curl -sS \
+  -o /dev/null \
+  -w 'HTTP status: %{http_code}\n' \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"HavenBridge Slack webhook connectivity test"}' \
+  "$SLACK_WEBHOOK_URL"
+
+Expected:
+
+HTTP status: 200
+
+After testing:
+
+unset SLACK_WEBHOOK_URL
+
+
+26. Submit Multi-Channel Synthetic Alert
+----------------------------------------
+
+STARTS_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+ENDS_AT=$(date -u -d '+10 minutes' +"%Y-%m-%dT%H:%M:%SZ")
+
+curl -sS -X POST \
+  -H 'Content-Type: application/json' \
+  -d "[
+    {
+      \"labels\": {
+        \"alertname\": \"HavenBridgeNotificationTest\",
+        \"severity\": \"warning\"
+      },
+      \"annotations\": {
+        \"summary\": \"HavenBridge multi-channel notification test\",
+        \"description\": \"Synthetic alert sent to validate both Discord and Slack delivery.\"
+      },
+      \"startsAt\": \"$STARTS_AT\",
+      \"endsAt\": \"$ENDS_AT\"
+    }
+  ]" \
+  http://127.0.0.1:9093/api/v2/alerts
+
+
+27. Resolve Multi-Channel Synthetic Alert
+-----------------------------------------
+
+ENDS_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+curl -sS -X POST \
+  -H 'Content-Type: application/json' \
+  -d "[
+    {
+      \"labels\": {
+        \"alertname\": \"HavenBridgeNotificationTest\",
+        \"severity\": \"warning\"
+      },
+      \"annotations\": {
+        \"summary\": \"HavenBridge multi-channel notification test\",
+        \"description\": \"Synthetic alert sent to validate both Discord and Slack delivery.\"
+      },
+      \"startsAt\": \"$STARTS_AT\",
+      \"endsAt\": \"$ENDS_AT\"
+    }
+  ]" \
+  http://127.0.0.1:9093/api/v2/alerts
+
+
+28. Verify Multi-Channel Synthetic Alert Cleared
+------------------------------------------------
+
+curl -s http://127.0.0.1:9093/api/v2/alerts \
+  | jq -r '
+      .[]
+      | select(.labels.alertname=="HavenBridgeNotificationTest")
+      | [.labels.alertname, .status.state, .labels.severity]
+      | @tsv
+    '
+
+No output confirmed the alert was resolved.

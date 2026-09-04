@@ -1,0 +1,94 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+
+metadata:
+  name: havenbridge-alerts
+  namespace: observability
+  labels:
+    release: havenbridge-monitoring
+
+spec:
+  groups:
+    - name: havenbridge-api.rules
+      rules:
+        - alert: HavenBridgeAPIUnavailable
+          expr: |
+            sum(up{namespace="havenbridge", service="havenbridge-api"}) == 0
+            or
+            absent(up{namespace="havenbridge", service="havenbridge-api"})
+          for: 2m
+
+          labels:
+            severity: critical
+
+          annotations:
+            summary: "HavenBridge API is unavailable"
+            description: "Prometheus cannot detect any healthy HavenBridge API scrape targets for at least 2 minutes."
+
+        - alert: HavenBridgeHigh5xxErrorRate
+          expr: |
+            (
+              100 *
+              (
+                sum(
+                  rate(
+                    havenbridge_http_requests_total{
+                      namespace="havenbridge",
+                      status_code=~"5..",
+                      route!~"/health/(live|ready)"
+                    }[5m]
+                  )
+                )
+                or vector(0)
+              )
+              /
+              sum(
+                rate(
+                  havenbridge_http_requests_total{
+                    namespace="havenbridge",
+                    route!~"/health/(live|ready)"
+                  }[5m]
+                )
+              )
+            ) > 5
+            and
+            sum(
+              rate(
+                havenbridge_http_requests_total{
+                  namespace="havenbridge",
+                  route!~"/health/(live|ready)"
+                }[5m]
+              )
+            ) > 0
+
+          for: 2m
+
+          labels:
+            severity: warning
+
+          annotations:
+            summary: "HavenBridge API has a high HTTP 5xx error rate"
+            description: "More than 5 percent of HavenBridge API requests have returned HTTP 5xx responses for at least 2 minutes."
+
+        - alert: HavenBridgeHighP95Latency
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum by (le) (
+                rate(
+                  havenbridge_http_request_duration_seconds_bucket{
+                    namespace="havenbridge",
+                    route!~"/health/(live|ready)"
+                  }[5m]
+                )
+              )
+            ) > 0.5
+
+          for: 2m
+
+          labels:
+            severity: warning
+
+          annotations:
+            summary: "HavenBridge API P95 latency is high"
+            description: "HavenBridge API P95 request latency has exceeded 500 milliseconds for at least 2 minutes."

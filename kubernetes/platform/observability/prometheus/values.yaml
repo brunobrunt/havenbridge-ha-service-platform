@@ -48,6 +48,9 @@ alertmanager:
     replicas: 1
     retention: 120h
 
+    alertmanagerConfigMatcherStrategy:
+      type: OnNamespaceExceptForAlertmanagerNamespace
+
     resources:
       requests:
         cpu: 100m
