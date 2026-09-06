@@ -1037,8 +1037,20 @@ do not create an application release by themselves.
 
 ### API-Specific Version Calculation
 
-HavenBridge contains application, Kubernetes, Terraform, Ansible, CI/CD, and
-other platform code.
+HavenBridge contains application, Kubernetes, Terraform, Ansible, CI/CD,
+observability and other platform code in the same repository.
+
+Semantic versions such as:
+
+```text
+v0.7.1
+v0.8.0
+v1.0.0
+```
+
+represent **HavenBridge API application releases**.
+
+They do not represent every change made anywhere in the repository.
 
 The semantic-version calculator therefore limits release-causing Git history
 to:
@@ -1047,25 +1059,152 @@ to:
 applications/havenbridge-api
 ```
 
-This prevents an unrelated infrastructure change such as:
+The implementation in:
 
 ```text
-feat: improve Terraform runner provisioning
+cicd/scripts/next-version.sh
 ```
 
-from incorrectly increasing the HavenBridge API version.
+uses:
 
-An application change such as:
+```bash
+git log \
+  "${LATEST_TAG}..HEAD" \
+  --pretty='%s%n%b' \
+  -- applications/havenbridge-api
+```
+
+The path at the end of the command is important:
 
 ```text
-feat: add referral endpoint
+-- applications/havenbridge-api
 ```
 
-remains eligible for a semantic-version increase when it changes files under:
+It tells Git:
 
 ```text
-applications/havenbridge-api
+Look at commits after the latest release tag,
+but only consider commits that changed the HavenBridge API application.
 ```
+
+The resulting release model is:
+
+```text
+API application changed
+        |
+        +---- feat: ----------------> MINOR
+        |
+        +---- fix: -----------------> PATCH
+        |
+        +---- BREAKING CHANGE ------> MAJOR
+```
+
+For example:
+
+```text
+feat(api): add referral endpoint
+```
+
+combined with a change under:
+
+```text
+applications/havenbridge-api/
+```
+
+is eligible for a MINOR application release.
+
+Likewise:
+
+```text
+fix(api): correct inquiry status validation
+```
+
+combined with an API application change is eligible for a PATCH release.
+
+Repository changes outside the API application do not create an unnecessary
+API release.
+
+Examples include:
+
+```text
+feat(observability):
+feat(terraform):
+feat(ansible):
+docs:
+chore:
+```
+
+when those commits do not modify:
+
+```text
+applications/havenbridge-api/
+```
+
+The resulting behavior is:
+
+```text
+Observability / infrastructure / documentation change
+        ↓
+HavenBridge CI still validates the repository
+        ↓
+HavenBridge Release evaluates semantic-version history
+        ↓
+no release-causing API commit found
+        ↓
+release_needed=false
+        ↓
+no new API semantic version
+        ↓
+no unnecessary GHCR API image
+        ↓
+no unnecessary Kubernetes API deployment
+```
+
+A real example occurred after Observability Phase 7.
+
+The commit:
+
+```text
+feat(observability): add combined operations dashboard
+```
+
+added the HavenBridge Operations Overview dashboard and observability
+documentation but did not modify:
+
+```text
+applications/havenbridge-api/
+```
+
+The current API release therefore correctly remained:
+
+```text
+v0.7.1
+```
+
+instead of incorrectly becoming:
+
+```text
+v0.8.0
+```
+
+This is intentional.
+
+The design keeps application version numbers meaningful:
+
+```text
+HavenBridge API version
+        =
+version of the HavenBridge API application
+
+not
+
+version of every infrastructure, observability,
+documentation or automation change in the repository
+```
+
+This also avoids rebuilding, publishing and redeploying an identical API
+container image when only surrounding platform components have changed.
+
 
 ### Full Git History
 
