@@ -230,10 +230,22 @@ NetworkPolicy security               ✅
 Private PKI                          ✅
 TLS / HTTPS                          ✅
 HTTP → HTTPS redirect                ✅
+CI/CD automation                     ✅
+Semantic release automation          ✅
+Prometheus monitoring                ✅
+Grafana dashboards                   ✅
+Loki centralized logging             ✅
+Alertmanager                         ✅
+Discord notifications                ✅
+Slack notifications                  ✅
+Combined operations dashboard        ✅
 ```
+CI/CD automation and the core HavenBridge observability stack are now
+operational.
 
-The next major phase is CI/CD deployment automation, followed by observability
-with Prometheus, Grafana and Alertmanager.
+The next observability step is controlled incident simulation, followed by
+continued application development including the HavenBridge frontend,
+synthetic demonstration data and later AI-assisted operations.
 
 ## Architecture
 
@@ -1517,54 +1529,54 @@ Response deadline
 Last updated time
 Internal demonstration notes
 ```
-
 Only synthetic demonstration data will be used.
 
+
 ---
-
-
 ### Phase 6 — CI/CD Automation
 
-**Status: next major phase**
+**Status: completed and operational**
 
-The next major goal is to automate application validation, container-image
-creation, publication and Kubernetes deployment.
+Completed:
 
-Planned work:
+- [x] FastAPI CI workflow implemented.
+- [x] Application tests run automatically.
+- [x] Docker builds validated automatically.
+- [x] Kubernetes manifests validated in CI.
+- [x] HavenBridge images published to GitHub Container Registry.
+- [x] Semantic version release automation implemented.
+- [x] `fix:` commits produce patch releases.
+- [x] `feat:` commits produce minor releases.
+- [x] breaking changes produce major releases.
+- [x] Approved releases trigger CD automatically.
+- [x] Self-hosted HavenBridge CD runner implemented.
+- [x] Restricted Kubernetes deployment identity implemented.
+- [x] Least-privilege Kubernetes RBAC validated.
+- [x] Deployment rollout verification implemented.
+- [x] Exact release SHA/image deployment validation implemented.
 
-- [ ] Create a CI workflow for the FastAPI application.
-- [ ] Run application tests automatically.
-- [ ] Validate the Docker build automatically.
-- [ ] Build versioned container images.
-- [ ] Authenticate securely to GitHub Container Registry.
-- [ ] Push approved images to GHCR.
-- [ ] Validate Kubernetes manifests automatically.
-- [ ] Automate deployment of approved releases.
-- [ ] Validate Kubernetes rollout status.
-- [ ] Add deployment verification.
-- [ ] Document rollback procedures.
-- [ ] Preserve CI/CD validation evidence.
-
-Planned delivery flow:
+Current delivery flow:
 
 ```text
 Developer change
       ↓
-Git commit
-      ↓
 GitHub
       ↓
-CI validation
+CI
       ↓
-Tests
+Tests + build + manifest validation
       ↓
-Container build
+Semantic release decision
       ↓
-GHCR
+Versioned release
       ↓
-Deployment automation
+GHCR image
       ↓
-Kubernetes
+Self-hosted CD runner
+      ↓
+Restricted Kubernetes deployer
+      ↓
+HavenBridge deployment
       ↓
 Rollout validation
 ```
@@ -1573,64 +1585,145 @@ Rollout validation
 
 ### Phase 7 — Observability
 
-**Status: planned**
+**Status: core observability completed through Combined Dashboards**
 
-Planned components:
+Completed:
 
-- [ ] Prometheus.
-- [ ] Grafana.
-- [ ] Alertmanager.
-- [ ] Kubernetes workload metrics.
-- [ ] Node-level metrics.
-- [ ] HavenBridge API metrics.
-- [ ] PostgreSQL monitoring where appropriate.
-- [ ] Dashboards.
-- [ ] Alert rules.
-- [ ] Availability monitoring.
-- [ ] Resource-usage monitoring.
+- [x] Prometheus monitoring stack deployed.
+- [x] Kubernetes workload and node metrics collected.
+- [x] HavenBridge application metrics implemented.
+- [x] Grafana deployed and validated.
+- [x] Loki centralized logging deployed.
+- [x] Grafana Alloy log collection deployed.
+- [x] HavenBridge-specific Prometheus alert rules created.
+- [x] Alertmanager configured.
+- [x] Slack firing and resolved notifications validated.
+- [x] Discord firing and resolved notifications validated.
+- [x] `HavenBridge — Operations Overview` dashboard created.
+- [x] Normal HTTP 200 traffic validated.
+- [x] Controlled HTTP 404 traffic validated.
+- [x] Controlled HTTP 500 traffic validated.
+- [x] Metrics, logs and alerts correlated during controlled failures.
+- [x] Recovery to healthy application state validated.
 
-Planned architecture:
+Current operational view includes:
 
 ```text
-Applications / Kubernetes / Nodes
-             ↓
-         Prometheus
-             ↓
-          Grafana
-             ↓
-         Dashboards
-
-         Prometheus
-             ↓
-        Alertmanager
-             ↓
-           Alerts
+API replica health
+request rate
+HTTP status behavior
+5xx error percentage
+P95 latency
+request distribution across replicas
+firing alerts
+application logs
+error logs
+recent pod restarts
 ```
 
 ---
 
-### Phase 8 — Application and Operational Maturity
+### Phase 8 — Incident Simulation
+
+**Status: next**
+
+With the core HavenBridge observability stack operational, the next phase will
+use controlled failure scenarios to validate how the platform behaves during
+realistic incidents.
+
+The goal is to practice the complete operational workflow:
+
+```text
+Detect
+  ↓
+Observe
+  ↓
+Investigate
+  ↓
+Correlate metrics + logs + Kubernetes state
+  ↓
+Identify root cause
+  ↓
+Recover
+  ↓
+Verify
+  ↓
+Document
+```
+
+---
+
+### Phase 9 — Application and Operational Maturity
 
 **Status: planned**
 
-Potential improvements include:
+This phase will continue expanding the HavenBridge application and strengthen
+the operational resilience of the platform after the core observability and
+incident-simulation work is complete.
 
-- [ ] Expand inquiry and referral functionality.
+Planned application improvements include:
+
+- [ ] Build the HavenBridge web frontend.
+- [ ] Expand inquiry and referral CRUD workflows.
+- [ ] Add realistic synthetic demonstration seed data.
+- [ ] Add the notification/SLA worker.
 - [ ] Introduce structured database migrations.
+- [ ] Add application-specific RBAC where required.
+- [ ] Evaluate HorizontalPodAutoscaler configuration where meaningful.
+
+Planned operational improvements include:
+
 - [ ] Implement PostgreSQL backup procedures.
 - [ ] Test PostgreSQL recovery procedures.
-- [ ] Add additional operational runbooks.
+- [ ] Create additional operational runbooks.
 - [ ] Perform controlled worker-node failure testing.
 - [ ] Perform controlled control-plane failure testing.
 - [ ] Validate kube-vip failover.
 - [ ] Create and test etcd backup procedures.
 - [ ] Test etcd recovery procedures.
 - [ ] Review physical-host recovery procedures.
-- [ ] Continue security hardening.
+- [ ] Continue Kubernetes and application security hardening.
+
+Only synthetic demonstration data will be used while expanding application
+functionality.
+
+The intended application workflow remains:
+
+```text
+New
+  ↓
+Assigned
+  ↓
+Under Review
+  ↓
+Contacted
+  ↓
+Awaiting Information
+  ↓
+Closed
+```
+
+The planned synthetic data model includes:
+
+```text
+Inquiry ID
+Synthetic client name
+Service category
+Assigned coordinator
+Status
+Created time
+Response deadline
+Last updated time
+Internal demonstration notes
+```
+
+This phase will prepare HavenBridge for the later AI-assisted operations work
+by providing richer application workflows, realistic synthetic data and more
+documented operational failure and recovery scenarios.
 
 ---
 
-### Phase 9 — AI-Assisted Kubernetes Operations
+### Phase 10 — AI-Assisted Kubernetes Operations
 
 **Status: planned after the core platform is completed**
 
@@ -2420,117 +2513,92 @@ git diff --cached | grep -Ei \
 
 ## Next Recommended Work
 
-The next active HavenBridge phase is **CI/CD automation using GitHub Actions**.
+The next active HavenBridge phase is **Observability Phase 8 — Incident Simulation**.
 
-### 1. GitHub Actions CI/CD
+### 1. Incident Simulation
 
-The immediate goal is to automate the application delivery process.
+The goal is to move beyond controlled HTTP traffic tests and introduce
+realistic application and Kubernetes failure scenarios.
 
-Planned work:
+Planned work includes:
 
-- Create the GitHub Actions workflow.
-- Run FastAPI tests automatically.
-- Validate the Docker build.
-- Build versioned HavenBridge API images.
-- Authenticate securely to GitHub Container Registry.
-- Push approved images to GHCR.
-- Validate Kubernetes manifests.
-- Automate deployment to the HavenBridge Kubernetes cluster.
-- Validate Deployment rollout status.
-- Add post-deployment health checks.
-- Document rollback procedures.
-- Save CI/CD validation evidence.
+- Simulate complete HavenBridge API unavailability.
+- Simulate degraded API replica availability.
+- Simulate PostgreSQL connectivity failure.
+- Observe Kubernetes workload and readiness changes.
+- Correlate Prometheus metrics with Loki logs.
+- Validate Prometheus alert transitions.
+- Validate Alertmanager notifications through Slack and Discord.
+- Perform controlled recovery.
+- Confirm alerts return to the resolved state.
+- Preserve incident evidence and troubleshooting steps.
 
-Planned delivery flow:
-
-```text
-Developer change
-        ↓
-Git commit
-        ↓
-GitHub
-        ↓
-GitHub Actions
-        ↓
-Application tests
-        ↓
-Docker build
-        ↓
-GitHub Container Registry
-        ↓
-Kubernetes deployment
-        ↓
-Rollout validation
-        ↓
-HTTPS health check
-```
-
-### 2. Observability
-
-After CI/CD, add platform and application observability using:
+The operational workflow will be:
 
 ```text
-Prometheus
-Grafana
-Alertmanager
+Detect
+  ↓
+Observe
+  ↓
+Investigate
+  ↓
+Correlate metrics + logs + Kubernetes state
+  ↓
+Identify root cause
+  ↓
+Recover
+  ↓
+Verify
+  ↓
+Document
 ```
 
-Planned monitoring includes:
+### 2. Application and Operational Maturity
 
-- Kubernetes node and workload metrics.
-- HavenBridge API availability.
-- API response latency and error rates.
-- PostgreSQL health where appropriate.
-- Resource utilization.
-- Dashboards.
-- Alert rules.
-- Alert delivery and validation.
-
-### 3. Application and Operational Maturity
-
-After the core CI/CD and observability work, continue expanding the HavenBridge
-application and operational capabilities.
+After the incident-simulation phase, continue expanding the HavenBridge
+application and improving platform resilience.
 
 Planned work includes:
 
 - Build the HavenBridge web frontend.
 - Expand inquiry and referral CRUD workflows.
-- Add synthetic demonstration data.
+- Populate meaningful application tables with realistic synthetic data.
 - Add the notification/SLA worker.
 - Introduce structured database migrations.
-- Implement PostgreSQL backups.
+- Implement PostgreSQL backup procedures.
 - Test PostgreSQL recovery.
-- Create etcd backup and recovery procedures.
-- Perform controlled worker-node failure testing.
-- Perform controlled control-plane failure testing.
+- Create and test etcd backup and recovery procedures.
+- Perform controlled worker and control-plane failure testing.
 - Validate kube-vip failover.
 - Continue Kubernetes and application security hardening.
 
-### 4. AI-Assisted Kubernetes Operations
+### 3. AI-Assisted Kubernetes Operations
 
-A later phase will introduce a secure read-only HavenBridge Kubernetes
-operations agent.
+A later phase will introduce a secure, read-only HavenBridge operations agent.
 
-The initial agent will inspect:
+The agent will inspect:
 
 ```text
-Workloads
-   ↓
-Pod readiness
-   ↓
+Kubernetes workloads
+        ↓
+Pod status and readiness
+        ↓
 Kubernetes Events
-   ↓
+        ↓
 EndpointSlices
-   ↓
+        ↓
 Application logs
-   ↓
+        ↓
 Metrics
-   ↓
+        ↓
 HavenBridge runbooks
 ```
 
 It will produce evidence-based incident summaries, likely root-cause
 explanations, troubleshooting recommendations and safe recovery commands.
+
+The initial implementation will remain read-only so the agent can assist with
+operations without directly modifying Kubernetes resources.
 
 ---
 

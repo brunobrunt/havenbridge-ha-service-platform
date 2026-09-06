@@ -12,3 +12,7 @@ configMapGenerator:
   - name: havenbridge-api-grafana-dashboard
     files:
       - havenbridge-api-application-overview.json
+
+  - name: havenbridge-operations-grafana-dashboard
+    files:
+      - havenbridge-operations-overview.json

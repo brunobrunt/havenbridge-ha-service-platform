@@ -750,6 +750,89 @@ HavenBridge API — Application Overview
 The live kube-prometheus-stack configuration was inspected before enabling
 custom dashboard provisioning.
 
+#### Grafana Pod Containers
+
+The Grafana Pod contains the main Grafana application container and two
+supporting sidecar containers.
+
+The running containers were validated with:
+
+```bash
+kubectl -n observability get \
+  $(kubectl -n observability get pods -o name | grep grafana | head -1) \
+  -o jsonpath='{range .spec.containers[*]}{.name}{"\n"}{end}'
+```
+
+Observed containers:
+
+```text
+grafana-sc-dashboard
+grafana-sc-datasources
+grafana
+```
+
+Their responsibilities are:
+
+```text
+grafana
+    = the main Grafana application
+
+grafana-sc-dashboard
+    = sidecar container that watches for dashboard ConfigMaps
+
+grafana-sc-datasources
+    = sidecar container that watches for datasource configuration
+```
+
+A sidecar is not a separate Pod in this design.
+
+It is an additional container running alongside the main Grafana container
+inside the same Kubernetes Pod.
+
+The relationship can be represented as:
+
+```text
+Grafana Pod
+│
+├── grafana
+│     └── main Grafana application
+│
+├── grafana-sc-dashboard
+│     └── discovers dashboard ConfigMaps
+│
+└── grafana-sc-datasources
+      └── discovers datasource configuration
+```
+
+For HavenBridge dashboards, the dashboard provisioning flow is:
+
+```text
+Dashboard JSON in Git
+        ↓
+Kustomize
+        ↓
+ConfigMap
+        ↓
+label:
+grafana_dashboard="1"
+        ↓
+grafana-sc-dashboard
+        ↓
+dashboard file made available to Grafana
+        ↓
+Grafana loads the dashboard
+```
+
+This is why HavenBridge dashboard JSON files are included in:
+
+```text
+kubernetes/platform/observability/grafana/dashboards/kustomization.yaml
+```
+
+The ConfigMap acts as the Kubernetes delivery mechanism for the dashboard
+configuration, while the `grafana-sc-dashboard` sidecar handles discovery and
+provisioning into Grafana.
+
 The effective Helm configuration showed:
 
 ```text
@@ -950,6 +1033,1101 @@ as image files.
 
 Installing the image renderer plugin is not required for the current
 observability phase.
+
+
+## HavenBridge — Operations Overview
+
+The `HavenBridge — Operations Overview` dashboard was created during
+Observability Phase 7 to provide a single operational view of HavenBridge
+application health, traffic, latency, errors, alerts, Kubernetes workload
+behavior and centralized application logs.
+
+This dashboard complements the existing:
+
+```text
+HavenBridge API — Application Overview
+```
+
+dashboard.
+
+The two dashboards serve different purposes:
+
+```text
+HavenBridge API — Application Overview
+    = detailed application metrics
+
+HavenBridge — Operations Overview
+    = cross-signal operational troubleshooting
+```
+
+The Operations Overview dashboard combines:
+
+```text
+Prometheus metrics
+        +
+Prometheus alert state
+        +
+Loki application logs
+        +
+Kubernetes workload metrics
+        ↓
+Grafana
+        ↓
+HavenBridge — Operations Overview
+```
+
+Its purpose is to help an operator quickly answer:
+
+```text
+Is the API healthy?
+Is application traffic reaching HavenBridge?
+Are requests succeeding?
+Are 5xx errors increasing?
+Is latency abnormal?
+Are both API replicas receiving traffic?
+Are HavenBridge alerts firing?
+What do the application logs show?
+Are recent container restarts occurring?
+```
+
+### Dashboard Panels
+
+The dashboard currently contains ten operational panels.
+
+---
+
+### Panel 1 — HavenBridge API Replicas Up
+
+**Purpose**
+
+Shows the number of HavenBridge API replicas currently being successfully
+scraped by Prometheus.
+
+**Visualization**
+
+```text
+Stat
+```
+
+**Data source**
+
+```text
+Prometheus
+```
+
+**PromQL**
+
+```promql
+sum(
+  up{
+    namespace="havenbridge",
+    service="havenbridge-api"
+  }
+) or vector(0)
+```
+
+**Query type**
+
+```text
+Instant
+```
+
+**Unit**
+
+```text
+None
+```
+
+**Value mappings**
+
+```text
+0 → DOWN
+1 → DEGRADED
+2 → HEALTHY
+```
+
+**Thresholds**
+
+```text
+Base → Red
+1    → Orange
+2    → Green
+```
+
+**Operational interpretation**
+
+```text
+2
+= both HavenBridge API replicas are available
+
+1
+= HavenBridge is still serving traffic but redundancy is degraded
+
+0
+= no HavenBridge API replica is available
+```
+
+---
+
+### Panel 2 — HavenBridge Application Request Rate
+
+**Purpose**
+
+Shows the rate of non-health-check requests received by the HavenBridge API
+over time.
+
+**Visualization**
+
+```text
+Time series
+```
+
+**Data source**
+
+```text
+Prometheus
+```
+
+**PromQL**
+
+```promql
+sum(
+  rate(
+    havenbridge_http_requests_total{
+      namespace="havenbridge",
+      route!~"/health/(live|ready)"
+    }[$__rate_interval]
+  )
+)
+```
+
+**Query type**
+
+```text
+Range
+```
+
+**Unit**
+
+```text
+requests/sec (req/s)
+```
+
+**Legend**
+
+```text
+Application requests
+```
+
+**Thresholds**
+
+No thresholds are required.
+
+This panel is intended to show traffic behavior over time rather than represent
+a binary healthy or unhealthy condition.
+
+**Operational interpretation**
+
+An increasing line indicates that application traffic is reaching HavenBridge.
+
+Routine Kubernetes health probes are excluded so the panel represents
+application traffic rather than readiness and liveness checks.
+
+---
+
+### Panel 3 — HavenBridge 5xx Error Percentage
+
+**Purpose**
+
+Shows the percentage of HavenBridge application requests returning HTTP 5xx
+server responses over the selected evaluation period.
+
+**Visualization**
+
+```text
+Stat
+```
+
+**Data source**
+
+```text
+Prometheus
+```
+
+**PromQL**
+
+```promql
+100 *
+(
+  sum(
+    rate(
+      havenbridge_http_requests_total{
+        namespace="havenbridge",
+        status_code=~"5..",
+        route!~"/health/(live|ready)"
+      }[$__rate_interval]
+    )
+  )
+  or vector(0)
+)
+/
+sum(
+  rate(
+    havenbridge_http_requests_total{
+      namespace="havenbridge",
+      route!~"/health/(live|ready)"
+    }[$__rate_interval]
+  )
+)
+```
+
+**Query type**
+
+```text
+Instant
+```
+
+**Unit**
+
+```text
+Percent (0-100)
+```
+
+**Legend**
+
+```text
+5xx error percentage
+```
+
+**No-value display**
+
+```text
+NO TRAFFIC
+```
+
+**Thresholds**
+
+```text
+Base → Green
+5    → Orange
+20   → Red
+```
+
+The warning threshold aligns with the HavenBridge 5xx alert, which evaluates
+whether server errors exceed approximately 5% of application traffic.
+
+**Operational interpretation**
+
+```text
+0%
+= recent application traffic contains no HTTP 5xx responses
+
+greater than 5%
+= server-error rate has crossed the warning threshold
+
+NO TRAFFIC
+= there is not enough application traffic to calculate an error percentage
+```
+
+`NO TRAFFIC` is intentionally different from `0%`.
+
+No traffic means there are no requests to evaluate, while `0%` means requests
+are occurring but none are returning server errors.
+
+---
+
+### Panel 4 — HavenBridge P95 Request Latency
+
+**Purpose**
+
+Shows the P95 request latency for HavenBridge application traffic.
+
+P95 answers:
+
+```text
+How quickly did 95% of recent application requests complete?
+```
+
+**Visualization**
+
+```text
+Stat
+```
+
+**Data source**
+
+```text
+Prometheus
+```
+
+**PromQL**
+
+```promql
+1000 * histogram_quantile(
+  0.95,
+  sum by (le) (
+    rate(
+      havenbridge_http_request_duration_seconds_bucket{
+        namespace="havenbridge",
+        route!~"/health/(live|ready)"
+      }[$__rate_interval]
+    )
+  )
+)
+```
+
+The result is multiplied by `1000` to convert seconds to milliseconds.
+
+**Query type**
+
+```text
+Instant
+```
+
+**Unit**
+
+```text
+milliseconds (ms)
+```
+
+**Legend**
+
+```text
+P95 latency
+```
+
+**No-value display**
+
+```text
+NO TRAFFIC
+```
+
+**Thresholds**
+
+```text
+Base → Green
+250  → Orange
+500  → Red
+```
+
+The `500 ms` threshold aligns with the
+`HavenBridgeHighP95Latency` warning alert.
+
+**Operational interpretation**
+
+For example:
+
+```text
+P95 = 4.75 ms
+```
+
+means approximately 95% of recent application requests completed in
+`4.75 ms` or less.
+
+Because this is a Stat visualization, the panel intentionally shows the
+current calculated value rather than X and Y graph axes.
+
+---
+
+### Panel 5 — HavenBridge HTTP Responses by Status Code
+
+**Purpose**
+
+Shows HavenBridge API response traffic over time grouped by HTTP status code.
+
+**Visualization**
+
+```text
+Time series
+```
+
+**Data source**
+
+```text
+Prometheus
+```
+
+**PromQL**
+
+```promql
+sum by (status_code) (
+  rate(
+    havenbridge_http_requests_total{
+      namespace="havenbridge",
+      route!~"/health/(live|ready)"
+    }[$__rate_interval]
+  )
+)
+```
+
+**Query type**
+
+```text
+Range
+```
+
+**Unit**
+
+```text
+requests/sec (req/s)
+```
+
+**Legend**
+
+```text
+HTTP {{status_code}}
+```
+
+Examples include:
+
+```text
+HTTP 200
+HTTP 404
+HTTP 500
+```
+
+**Thresholds**
+
+No thresholds are required.
+
+The purpose of this panel is to compare response-code behavior over time.
+
+**Operational interpretation**
+
+```text
+HTTP 200
+= successful application request
+
+HTTP 404
+= requested application route or resource was not found
+
+HTTP 500
+= server-side application failure
+```
+
+During controlled validation the panel successfully displayed separate
+HTTP `200`, `404` and `500` behavior.
+
+---
+
+### Panel 6 — HavenBridge Request Rate by Replica
+
+**Purpose**
+
+Shows the HavenBridge API request rate handled by each application replica over
+time.
+
+**Visualization**
+
+```text
+Time series
+```
+
+**Data source**
+
+```text
+Prometheus
+```
+
+**PromQL**
+
+```promql
+sum by (pod) (
+  rate(
+    havenbridge_http_requests_total{
+      namespace="havenbridge",
+      route!~"/health/(live|ready)"
+    }[$__rate_interval]
+  )
+)
+```
+
+**Query type**
+
+```text
+Range
+```
+
+**Unit**
+
+```text
+requests/sec (req/s)
+```
+
+**Legend**
+
+```text
+{{pod}}
+```
+
+**Thresholds**
+
+No thresholds are required.
+
+**Operational interpretation**
+
+Each line represents one HavenBridge API Pod.
+
+The panel helps determine whether application traffic is reaching both API
+replicas.
+
+Two lines may occasionally overlap when both replicas are processing similar
+request rates.
+
+The legend should therefore also be checked when verifying replica activity.
+
+---
+
+### Panel 7 — Firing HavenBridge Alerts
+
+**Purpose**
+
+Shows the number of HavenBridge-specific Prometheus alerts currently in the
+`firing` state.
+
+**Visualization**
+
+```text
+Stat
+```
+
+**Data source**
+
+```text
+Prometheus
+```
+
+**PromQL**
+
+```promql
+count(
+  ALERTS{
+    alertname=~"HavenBridge.*",
+    alertstate="firing"
+  }
+) or vector(0)
+```
+
+**Query type**
+
+```text
+Instant
+```
+
+**Unit**
+
+```text
+None
+```
+
+**Legend**
+
+```text
+Firing alerts
+```
+
+**Value mapping**
+
+```text
+0 → NO ACTIVE ALERTS
+```
+
+The zero state is displayed as green.
+
+**Thresholds**
+
+```text
+Base → Green
+1    → Red
+```
+
+**Operational interpretation**
+
+```text
+0
+= no HavenBridge alert is currently firing
+
+1 or more
+= one or more HavenBridge operational alerts require attention
+```
+
+During controlled HTTP 500 validation this panel changed from:
+
+```text
+NO ACTIVE ALERTS
+```
+
+to:
+
+```text
+1
+```
+
+when `HavenBridgeHigh5xxErrorRate` entered the firing state.
+
+It returned to the healthy state after recovery.
+
+---
+
+### Panel 8 — HavenBridge Application Logs
+
+**Purpose**
+
+Shows recent HavenBridge API application logs collected by Grafana Alloy and
+stored in Loki.
+
+Routine health-check and Prometheus metrics requests are filtered so the panel
+focuses on useful application activity.
+
+**Visualization**
+
+```text
+Logs
+```
+
+**Data source**
+
+```text
+Loki
+```
+
+**LogQL**
+
+```logql
+{namespace="havenbridge", app="havenbridge-api"}
+  != "/health/live"
+  != "/health/ready"
+  != "/metrics"
+```
+
+**Query type**
+
+```text
+Range
+```
+
+**Display settings**
+
+```text
+Show timestamps: ON
+Wrap lines:      ON
+Display log level
+```
+
+**Unit**
+
+Not applicable.
+
+**Legend**
+
+Not required.
+
+**Thresholds**
+
+Not applicable.
+
+**Operational interpretation**
+
+This panel provides application request context alongside the Prometheus
+metrics.
+
+During normal traffic validation it displayed entries such as:
+
+```text
+GET / HTTP/1.1 200 OK
+```
+
+During controlled error testing it also showed the corresponding application
+requests.
+
+---
+
+### Panel 9 — HavenBridge Error Logs
+
+**Purpose**
+
+Shows recent HavenBridge API log entries associated with HTTP 5xx responses,
+application errors, exceptions and tracebacks.
+
+**Visualization**
+
+```text
+Logs
+```
+
+**Data source**
+
+```text
+Loki
+```
+
+**LogQL**
+
+```logql
+{namespace="havenbridge", app="havenbridge-api"}
+  |~ "(?i)(error|exception|traceback| 5[0-9][0-9] )"
+```
+
+**Query type**
+
+```text
+Range
+```
+
+**Display settings**
+
+```text
+Show timestamps: ON
+Wrap lines:      ON
+Display log level
+```
+
+**Unit**
+
+Not applicable.
+
+**Legend**
+
+Not required.
+
+**Thresholds**
+
+Not applicable.
+
+**Operational interpretation**
+
+During normal healthy operation this panel may display:
+
+```text
+No data
+```
+
+That is expected when no recent application errors exist.
+
+During controlled HTTP 500 validation the panel populated with the intentional
+server-error requests generated through:
+
+```text
+/test/500
+```
+
+This provides immediate log context when a server-error metric or alert is
+observed.
+
+---
+
+### Panel 10 — HavenBridge Recent Pod Restarts
+
+**Purpose**
+
+Shows the number of HavenBridge container restarts detected during the most
+recent 15-minute evaluation window.
+
+**Visualization**
+
+```text
+Stat
+```
+
+**Data source**
+
+```text
+Prometheus
+```
+
+**PromQL**
+
+```promql
+sum(
+  increase(
+    kube_pod_container_status_restarts_total{
+      namespace="havenbridge"
+    }[15m]
+  )
+) or vector(0)
+```
+
+**Query type**
+
+```text
+Instant
+```
+
+**Unit**
+
+```text
+None
+```
+
+**Legend**
+
+```text
+Recent restarts
+```
+
+**Decimals**
+
+```text
+0
+```
+
+**Thresholds**
+
+```text
+Base → Green
+1    → Orange
+3    → Red
+```
+
+**Operational interpretation**
+
+The panel intentionally uses a recent time window instead of displaying the
+lifetime Kubernetes restart counter.
+
+The original dashboard design used:
+
+```promql
+sum(
+  kube_pod_container_status_restarts_total{
+    namespace="havenbridge"
+  }
+) or vector(0)
+```
+
+That query displayed:
+
+```text
+3
+```
+
+even though the HavenBridge API Pods were healthy.
+
+Kubernetes inspection showed:
+
+```text
+HavenBridge API replicas
+    → 0 restarts
+
+PostgreSQL Pod
+    → 3 historical restarts accumulated over its lifetime
+```
+
+The lifetime counter therefore created a misleading operational signal.
+
+The dashboard was changed to answer:
+
+```text
+Have any HavenBridge containers restarted recently?
+```
+
+rather than:
+
+```text
+Have any HavenBridge containers ever restarted?
+```
+
+This makes the panel more useful during active incident investigation.
+
+---
+
+### Why `$__rate_interval` Is Used
+
+Several dashboard PromQL queries use:
+
+```text
+$__rate_interval
+```
+
+instead of a fixed interval such as:
+
+```text
+5m
+```
+
+`$__rate_interval` is calculated by Grafana using factors such as:
+
+```text
+dashboard time range
+panel resolution
+Prometheus scrape interval
+```
+
+This allows the same dashboard query to remain useful when switching between
+ranges such as:
+
+```text
+Last 5 minutes
+Last 1 hour
+Last 6 hours
+```
+
+A direct Prometheus command using:
+
+```promql
+rate(...[5m])
+```
+
+may therefore produce a slightly different numeric value from the value
+displayed by Grafana at the same moment.
+
+The two queries are answering the same type of operational question but may be
+using different evaluation windows.
+
+---
+
+### Phase 7 Dashboard Validation
+
+The Operations Overview dashboard was validated using three controlled traffic
+scenarios.
+
+#### Normal HTTP 200 Traffic
+
+Normal application requests were generated against:
+
+```text
+https://havenbridge.lab/
+```
+
+Expected and observed behavior included:
+
+```text
+API replicas       → HEALTHY
+request rate       → increased
+HTTP status        → HTTP 200
+P95 latency        → low
+5xx percentage     → 0%
+firing alerts      → NO ACTIVE ALERTS
+application logs   → GET / ... 200 OK
+error logs         → no error entries
+recent restarts    → 0
+```
+
+#### Controlled HTTP 404 Traffic
+
+Requests were generated against the nonexistent route:
+
+```text
+https://havenbridge.lab/this-route-does-not-exist
+```
+
+The dashboard correctly showed:
+
+```text
+HTTP 404 status traffic
+        +
+404 application log entries
+        +
+0% server-error percentage
+        +
+no HavenBridge server-error alert
+```
+
+This confirmed that a client-side `404` condition is observable without being
+incorrectly classified as a server-side `5xx` incident.
+
+#### Controlled HTTP 500 Traffic
+
+The protected observability test endpoint was temporarily enabled:
+
+```text
+/test/500
+```
+
+Controlled HTTP 500 traffic produced:
+
+```text
+HTTP 500 status series
+        ↓
+5xx percentage increase
+        ↓
+HavenBridge error-log entries
+        ↓
+HavenBridgeHigh5xxErrorRate
+        ↓
+pending
+        ↓
+firing
+        ↓
+Firing HavenBridge Alerts = 1
+        ↓
+Alertmanager
+        ↓
+Slack + Discord
+```
+
+After the controlled test endpoint was disabled and the application recovered:
+
+```text
+5xx traffic stopped
+        ↓
+Prometheus rolling window cleared
+        ↓
+alert returned to healthy state
+        ↓
+Firing HavenBridge Alerts = 0
+        ↓
+Slack + Discord resolved notifications
+```
+
+This demonstrated end-to-end correlation across metrics, logs, alert state and
+external notification channels.
+
+---
+
+### Dashboard Source Control
+
+The Operations Overview dashboard should be preserved in Git rather than
+existing only as a manually edited Grafana object.
+
+The dashboard source file is intended to be:
+
+```text
+kubernetes/platform/observability/grafana/dashboards/havenbridge-operations-overview.json
+```
+
+The complete dashboard lifecycle is:
+
+```text
+Grafana dashboard
+        ↓
+controlled validation
+        ↓
+export dashboard JSON
+        ↓
+store JSON in Git
+        ↓
+provision through Kubernetes
+        ↓
+Grafana sidecar loads dashboard
+```
+
+This follows the existing HavenBridge dashboard-management principle:
+
+```text
+Git
+= source of truth
+
+Grafana UI
+= visualization and controlled dashboard development
+```
+
+Permanent dashboard changes should therefore be exported and committed rather
+than remaining only in the live Grafana database.
+
+Detailed Phase 7 validation evidence is stored separately under:
+
+```text
+kubernetes/platform/observability/evidence/
+```
+
+The next observability phase is:
+
+```text
+Observability Phase 8 — Incident Simulation
+```
+
+That phase will use the Operations Overview dashboard as a first-stop
+investigation interface during realistic controlled HavenBridge failures.
 
 
 ## Persistent Administrative Access

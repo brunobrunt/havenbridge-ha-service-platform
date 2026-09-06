@@ -608,8 +608,7 @@ Each component must first be understood and validated independently.
 
 ## Implementation Phases
 
-### O1 — Observability Foundation
-
+### Observability Phase 1 — Foundation
 Goals:
 
 ```text
@@ -629,7 +628,7 @@ IN PROGRESS
 
 ---
 
-### O2 — Prometheus Monitoring Stack
+### Observability Phase 2 — Prometheus Monitoring Stack
 
 Goals:
 
@@ -654,8 +653,7 @@ in this repository.
 
 ---
 
-### O3 — Grafana
-
+### Observability Phase 3 — Grafana
 Goals:
 
 ```text
@@ -678,7 +676,7 @@ HavenBridge workload health
 
 ---
 
-### O4 — HavenBridge Application Metrics
+### Observability Phase 4 — HavenBridge Application Metrics
 
 The FastAPI application will later expose application-specific metrics.
 
@@ -700,7 +698,7 @@ the Kubernetes infrastructure around it.
 
 ---
 
-### O5 — Loki and Grafana Alloy
+### Observability Phase 5 — Centralized Logging
 
 Goals:
 
@@ -723,7 +721,7 @@ Traefik
 
 ---
 
-### O6 — Alerting
+### Observability Phase 6 — Alerting
 
 Goals:
 
@@ -740,7 +738,7 @@ thresholds wherever possible.
 
 ---
 
-### O7 — Combined Operational Dashboards
+### Observability Phase 7 — Combined Dashboards
 
 This phase will combine metrics and logs for troubleshooting.
 
@@ -761,7 +759,7 @@ Incident cause becomes easier to identify
 
 ---
 
-### O8 — Incident Simulation and Validation
+### Observability Phase 8 — Incident Simulation
 
 Controlled failure scenarios may include:
 
@@ -2603,3 +2601,466 @@ kubernetes/platform/observability/evidence/havenbridge-alerting-validation.txt
 | `HavenBridgeAPIUnavailable` | critical | Detects when all HavenBridge API targets are unavailable or disappear |
 | `HavenBridgeHigh5xxErrorRate` | warning | Detects when HTTP 5xx responses exceed 5% of application traffic |
 | `HavenBridgeHighP95Latency` | warning | Detects when P95 request latency exceeds 500 ms |
+
+
+---
+## Observability Phase 7 — Combined Dashboards
+
+Observability Phase 7 brought the HavenBridge metrics, logs and alerting
+capabilities together into a single operational Grafana dashboard.
+
+The dashboard is named:
+
+```text
+HavenBridge — Operations Overview
+```
+
+The purpose of this dashboard is not to replace the detailed application
+dashboard or the individual Prometheus, Loki and Alertmanager interfaces.
+
+Instead, it provides a first-stop operational view that helps answer:
+
+```text
+Is the HavenBridge API available?
+        ↓
+Is traffic reaching the application?
+        ↓
+Are requests succeeding?
+        ↓
+Are server errors increasing?
+        ↓
+Is request latency healthy?
+        ↓
+Are both API replicas receiving traffic?
+        ↓
+Are HavenBridge alerts currently firing?
+        ↓
+What do the application logs show?
+        ↓
+Are recent container restarts occurring?
+```
+
+### Combined Observability Model
+
+Before the combined dashboard was created, the individual observability
+components already provided their own specialized information:
+
+```text
+Prometheus
+    = metrics and alert-rule evaluation
+
+Loki
+    = centralized log storage
+
+Grafana Alloy
+    = Kubernetes log collection
+
+Alertmanager
+    = alert routing and notification delivery
+
+Grafana
+    = metrics and log visualization
+```
+
+Phase 7 combines those signals into an operator-focused view:
+
+```text
+Kubernetes + HavenBridge
+        |
+        +---- Metrics ----> Prometheus ----+
+        |                                  |
+        +---- Logs -------> Alloy -> Loki -+----> Grafana
+        |                                  |        |
+        +---- Alerts -----> Alertmanager --+        v
+                                                 HavenBridge
+                                             Operations Overview
+```
+
+Alertmanager continues to deliver HavenBridge notifications independently to:
+
+```text
+Alertmanager
+     |
+     +----> Slack
+     |
+     +----> Discord
+```
+
+### Operations Overview Panels
+
+The combined dashboard currently contains the following operational panels:
+
+| Panel | Visualization | Operational Purpose |
+|---|---|---|
+| HavenBridge API Replicas Up | Stat | Shows how many HavenBridge API targets are currently healthy |
+| HavenBridge Application Request Rate | Time series | Shows non-health-check request traffic reaching the API |
+| HavenBridge 5xx Error Percentage | Stat | Shows the percentage of application traffic returning server errors |
+| HavenBridge P95 Request Latency | Stat | Shows the latency below which 95% of recent application requests completed |
+| HavenBridge HTTP Responses by Status Code | Time series | Shows response traffic grouped by HTTP status code |
+| HavenBridge Request Rate by Replica | Time series | Shows traffic handled by each HavenBridge API Pod |
+| Firing HavenBridge Alerts | Stat | Shows the number of currently firing HavenBridge alerts |
+| HavenBridge Application Logs | Logs | Shows recent application logs while filtering routine health and metrics traffic |
+| HavenBridge Error Logs | Logs | Shows recent error, exception, traceback and HTTP 5xx-related log entries |
+| HavenBridge Recent Pod Restarts | Stat | Shows container restarts detected during the recent evaluation window |
+
+Detailed PromQL, LogQL, visualization settings, units, legends, thresholds and
+value mappings are documented in:
+
+```text
+kubernetes/platform/observability/grafana/README.md
+```
+
+### Healthy Traffic Validation
+
+The dashboard was first validated using normal HavenBridge application traffic.
+
+Controlled HTTP requests were generated against:
+
+```text
+https://havenbridge.lab/
+```
+
+The validation confirmed that:
+
+- application request rate increased;
+- HTTP `200` traffic appeared in the status-code panel;
+- traffic was observable across the HavenBridge API replicas;
+- P95 latency remained low;
+- HTTP 5xx percentage remained at `0%`;
+- no HavenBridge alert fired;
+- application logs showed successful requests; and
+- recent container restarts remained at zero.
+
+This established the healthy operational baseline before introducing controlled
+failure traffic.
+
+### Controlled HTTP 404 Validation
+
+A nonexistent application route was then requested repeatedly:
+
+```text
+https://havenbridge.lab/this-route-does-not-exist
+```
+
+FastAPI returned:
+
+```text
+HTTP 404
+```
+
+The HavenBridge request counter recorded the traffic using:
+
+```text
+status_code="404"
+route="unmatched"
+```
+
+Prometheus confirmed that the HTTP 404 request counter increased on both API
+replicas.
+
+The status-code dashboard panel also displayed an `HTTP 404` series.
+
+The test demonstrated an important distinction:
+
+```text
+HTTP 404
+    = client/request error
+
+HTTP 500
+    = server/application error
+```
+
+Therefore the controlled 404 traffic:
+
+- appeared in application metrics;
+- appeared in application logs;
+- appeared in the HTTP status-code dashboard;
+- did not increase the 5xx error percentage; and
+- did not trigger the HavenBridge server-error alert.
+
+This proved that the observability design can distinguish client-side request
+errors from server-side application failures.
+
+### Request Rate Interpretation
+
+The HTTP status-code panels use Prometheus `rate()` calculations.
+
+For example:
+
+```promql
+rate(havenbridge_http_requests_total[5m])
+```
+
+does not show the total number of requests that have ever occurred.
+
+It answers:
+
+```text
+How quickly has this counter been increasing
+during the last five minutes?
+```
+
+The result is expressed as:
+
+```text
+requests per second
+```
+
+For example:
+
+```text
+0.058 req/s
+```
+
+represents a request rate calculated from the recent counter increase rather
+than a cumulative request total.
+
+Grafana normally uses:
+
+```text
+$__rate_interval
+```
+
+instead of a fixed five-minute interval so the query automatically adapts to
+the selected dashboard time range and graph resolution.
+
+### Controlled HTTP 500 Validation
+
+The HavenBridge API contains a controlled observability test endpoint:
+
+```text
+/test/500
+```
+
+The endpoint is disabled during normal operation.
+
+It is available only when the following application environment variable is
+temporarily enabled:
+
+```text
+ENABLE_OBSERVABILITY_TEST_ENDPOINTS=true
+```
+
+This provides a safe and repeatable way to generate intentional HTTP `500`
+responses without modifying normal application behavior.
+
+The Phase 7 validation generated a controlled mixture of:
+
+```text
+normal HTTP 200 requests
+        +
+intentional HTTP 500 requests
+```
+
+The dashboard successfully correlated the resulting signals.
+
+Observed behavior included:
+
+- HTTP `500` appearing in the status-code panel;
+- HTTP 5xx percentage increasing above the alert threshold;
+- `/test/500` responses appearing in the application logs;
+- HTTP 500 entries appearing in the error-log panel;
+- `HavenBridgeHigh5xxErrorRate` transitioning from `inactive` to `pending`;
+- the alert transitioning from `pending` to `firing` after the configured duration;
+- the firing-alert dashboard panel increasing to `1`;
+- Alertmanager receiving the firing alert;
+- Slack receiving the firing notification;
+- Discord receiving the firing notification; and
+- resolved notifications being delivered after recovery.
+
+The controlled endpoint was disabled again after testing.
+
+Normal application behavior was then restored.
+
+### Alert Timing During Recovery
+
+The controlled HTTP 500 validation also demonstrated why an alert does not
+necessarily resolve immediately after error traffic stops.
+
+The 5xx alert evaluates a rolling window:
+
+```text
+rate(...[5m])
+```
+
+This means recently generated HTTP 500 requests remain part of the calculation
+until they age out of the five-minute window or sufficient healthy traffic
+reduces the calculated error percentage.
+
+The alert also uses:
+
+```text
+for: 2m
+```
+
+which requires the failure condition to remain true continuously before the
+alert transitions to `firing`.
+
+Alertmanager is configured with:
+
+```text
+groupInterval: 5m
+```
+
+and both Slack and Discord notification integrations use resolved
+notifications.
+
+The resulting operational lifecycle is therefore:
+
+```text
+500 traffic generated
+        ↓
+5xx percentage exceeds threshold
+        ↓
+alert pending
+        ↓
+condition remains true for 2 minutes
+        ↓
+alert firing
+        ↓
+Alertmanager
+        ↓
+Slack + Discord firing notification
+        ↓
+500 traffic stops
+        ↓
+rolling Prometheus window clears
+        ↓
+alert becomes healthy
+        ↓
+Alertmanager notification grouping
+        ↓
+Slack + Discord resolved notification
+```
+
+This behavior reduces notification churn during short-lived or flapping
+conditions.
+
+### Recent Pod Restart Interpretation
+
+The initial dashboard design displayed the cumulative Kubernetes container
+restart counter:
+
+```promql
+sum(
+  kube_pod_container_status_restarts_total{
+    namespace="havenbridge"
+  }
+)
+```
+
+During validation this displayed:
+
+```text
+3
+```
+
+Kubernetes inspection showed that the three restarts belonged to the
+long-running PostgreSQL Pod and had accumulated during its lifetime.
+
+The HavenBridge API Pods themselves had zero restarts.
+
+A lifetime restart count therefore did not accurately represent the current
+operational condition.
+
+The panel was changed to detect only recent restart activity:
+
+```promql
+sum(
+  increase(
+    kube_pod_container_status_restarts_total{
+      namespace="havenbridge"
+    }[15m]
+  )
+) or vector(0)
+```
+
+The panel is now named:
+
+```text
+HavenBridge Recent Pod Restarts
+```
+
+This answers the more useful operational question:
+
+```text
+Have any HavenBridge containers restarted recently?
+```
+
+rather than:
+
+```text
+Have any HavenBridge containers ever restarted?
+```
+
+### Phase 7 Validation Result
+
+The combined dashboard successfully demonstrated correlation across:
+
+```text
+Application traffic
+        ↓
+FastAPI metrics
+        ↓
+Prometheus
+        ↓
+Grafana metrics panels
+
+Application logs
+        ↓
+Grafana Alloy
+        ↓
+Loki
+        ↓
+Grafana log panels
+
+Prometheus alert rules
+        ↓
+Alertmanager
+        ↓
+Grafana firing-alert panel
+        ↓
+Slack + Discord
+```
+
+Three controlled traffic scenarios were validated:
+
+| Scenario | Expected Result | Result |
+|---|---|---|
+| Normal HTTP 200 traffic | Healthy metrics and logs with no alert | PASS |
+| Controlled HTTP 404 traffic | 404 visible without triggering a 5xx alert | PASS |
+| Controlled HTTP 500 traffic | Metrics, logs and alerting correlate during the failure | PASS |
+
+The final recovery state confirmed:
+
+- HavenBridge API replicas returned to normal operation;
+- the controlled HTTP 500 endpoint was disabled;
+- server-error traffic stopped;
+- the Prometheus alert returned to a healthy state;
+- the Grafana firing-alert panel returned to no active alerts; and
+- Slack and Discord received resolved notifications.
+
+Phase 7 therefore established a working cross-signal operational dashboard for
+HavenBridge.
+
+Detailed Phase 7 dashboard implementation is documented in:
+
+```text
+kubernetes/platform/observability/grafana/README.md
+```
+
+Phase 7 validation evidence will be preserved in:
+
+```text
+kubernetes/platform/observability/evidence/havenbridge-combined-dashboard-validation.txt
+```
+
+The next observability phase is:
+
+```text
+Observability Phase 8 — Incident Simulation
+```
+
+Phase 8 will move beyond controlled HTTP traffic and introduce realistic
+application and Kubernetes failure scenarios that require detection,
+investigation, root-cause identification, recovery and validation.

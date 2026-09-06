@@ -1,0 +1,571 @@
+HavenBridge Observability Phase 7
+Combined Dashboard Validation Evidence
+========================================
+
+Dashboard:
+HavenBridge — Operations Overview
+
+Purpose
+-------
+
+Validate that the combined Grafana operations dashboard correctly correlates
+HavenBridge application traffic, Prometheus metrics, Loki logs, Kubernetes
+workload information and Prometheus alert state.
+
+The validation used three controlled traffic scenarios:
+
+1. Normal HTTP 200 traffic
+2. Controlled HTTP 404 traffic
+3. Controlled HTTP 500 traffic
+
+
+============================================================
+TEST 1 — NORMAL APPLICATION TRAFFIC
+============================================================
+
+Host:
+syrus
+
+Command:
+
+for i in {1..50}; do
+  curl -s https://havenbridge.lab/ > /dev/null
+done
+
+Grafana time range:
+
+Last 5 minutes
+
+Observed dashboard behavior:
+
+HavenBridge API Replicas Up
+    HEALTHY
+
+HavenBridge Application Request Rate
+    request activity increased
+
+HavenBridge HTTP Responses by Status Code
+    HTTP 200 traffic appeared
+
+HavenBridge Request Rate by Replica
+    application traffic was observable across API replicas
+
+HavenBridge P95 Request Latency
+    remained low
+
+HavenBridge 5xx Error Percentage
+    0%
+
+Firing HavenBridge Alerts
+    NO ACTIVE ALERTS
+
+HavenBridge Application Logs
+    successful GET / requests appeared
+
+HavenBridge Error Logs
+    no server-error entries
+
+HavenBridge Recent Pod Restarts
+    0
+
+Result:
+
+PASS
+
+Normal HavenBridge application traffic was visible in metrics and logs without
+triggering an alert.
+
+
+============================================================
+TEST 2 — CONTROLLED HTTP 404 TRAFFIC
+============================================================
+
+Host:
+syrus
+
+Initial verification:
+
+curl -i https://havenbridge.lab/this-route-does-not-exist
+
+Expected and observed application response:
+
+HTTP 404
+
+Controlled traffic generation:
+
+for i in {1..30}; do
+  curl -s https://havenbridge.lab/this-route-does-not-exist > /dev/null
+done
+
+
+Prometheus verification
+-----------------------
+
+Host:
+eph-cp01
+
+Command:
+
+curl -sG \
+  http://127.0.0.1:9090/api/v1/query \
+  --data-urlencode 'query=sum by (status_code) (
+    rate(
+      havenbridge_http_requests_total{
+        namespace="havenbridge",
+        route!~"/health/(live|ready)"
+      }[5m]
+    )
+  )' \
+  | jq -r '
+      .data.result[]
+      | [.metric.status_code, .value[1]]
+      | @tsv
+    '
+
+Observed example:
+
+200     0
+404     approximately 0.058 requests/sec
+
+
+404 counter verification:
+
+curl -sG \
+  http://127.0.0.1:9090/api/v1/query \
+  --data-urlencode 'query=havenbridge_http_requests_total{
+    namespace="havenbridge",
+    status_code="404"
+  }' \
+  | jq '.data.result'
+
+Observed:
+
+Both HavenBridge API replicas contained a 404 counter series.
+
+The metric labels included:
+
+status_code="404"
+route="unmatched"
+
+
+Grafana validation
+------------------
+
+Observed dashboard behavior:
+
+HavenBridge HTTP Responses by Status Code
+    HTTP 404 appeared as a separate series
+
+HavenBridge Application Logs
+    nonexistent-route requests appeared
+
+HavenBridge 5xx Error Percentage
+    remained 0%
+
+Firing HavenBridge Alerts
+    remained NO ACTIVE ALERTS
+
+HavenBridge Error Logs
+    no 5xx server-error incident was reported
+
+Result:
+
+PASS
+
+The dashboard correctly distinguished HTTP 404 client errors from HTTP 5xx
+server errors.
+
+
+Important interpretation
+------------------------
+
+Prometheus:
+
+rate(...[5m])
+
+returns a per-second rate calculated from counter changes during the previous
+five minutes.
+
+For example:
+
+0.058 requests/sec
+
+is not a cumulative request count.
+
+Grafana normally uses:
+
+$__rate_interval
+
+so Grafana and a direct fixed [5m] Prometheus query may display slightly
+different numeric values.
+
+
+============================================================
+TEST 3 — CONTROLLED HTTP 500 INCIDENT
+============================================================
+
+The /test/500 endpoint is disabled during normal HavenBridge operation.
+
+
+Initial validation
+------------------
+
+Host:
+syrus
+
+Command:
+
+curl -i https://havenbridge.lab/test/500
+
+Expected normal state:
+
+HTTP 404
+
+
+Enable controlled test endpoint
+-------------------------------
+
+Host:
+eph-cp01
+
+Command:
+
+kubectl -n havenbridge set env deployment/havenbridge-api \
+  ENABLE_OBSERVABILITY_TEST_ENDPOINTS=true
+
+kubectl -n havenbridge rollout status \
+  deployment/havenbridge-api \
+  --timeout=180s
+
+
+Verify controlled endpoint
+--------------------------
+
+Host:
+syrus
+
+Command:
+
+curl -i https://havenbridge.lab/test/500
+
+Expected and observed response:
+
+HTTP 500
+
+
+Generate mixed application traffic
+----------------------------------
+
+Host:
+syrus
+
+Commands:
+
+for i in {1..80}; do
+  curl -s https://havenbridge.lab/ > /dev/null
+done
+
+for i in {1..20}; do
+  curl -s https://havenbridge.lab/test/500 > /dev/null
+done
+
+
+Alert validation
+----------------
+
+Host:
+eph-cp01
+
+Command:
+
+watch -n 10 '
+curl -s http://127.0.0.1:9090/api/v1/alerts |
+jq -r "
+  .data.alerts[]
+  | select(.labels.alertname == \"HavenBridgeHigh5xxErrorRate\")
+  | [.labels.alertname, .state, .labels.severity]
+  | @tsv
+"
+'
+
+Observed alert lifecycle:
+
+inactive
+    ↓
+pending
+    ↓
+firing
+
+Alert:
+
+HavenBridgeHigh5xxErrorRate
+
+Severity:
+
+warning
+
+
+Grafana validation
+------------------
+
+Observed dashboard behavior:
+
+HavenBridge 5xx Error Percentage
+    increased above the configured warning threshold
+
+HavenBridge HTTP Responses by Status Code
+    HTTP 500 appeared
+
+HavenBridge Application Logs
+    /test/500 requests appeared
+
+HavenBridge Error Logs
+    HTTP 500 error entries appeared
+
+Firing HavenBridge Alerts
+    changed from NO ACTIVE ALERTS to 1
+
+HavenBridge Recent Pod Restarts
+    remained 0
+
+The controlled HTTP 500 response demonstrated an application error without
+requiring a container crash.
+
+
+Notification validation
+-----------------------
+
+Alertmanager successfully routed the firing alert to:
+
+Slack
+    #havenbridge-alerts
+
+Discord
+    #havenbridge-alerts
+
+Both notification channels received:
+
+HavenBridgeHigh5xxErrorRate — firing
+
+After recovery, both channels also received:
+
+HavenBridgeHigh5xxErrorRate — resolved
+
+
+Alert timing
+------------
+
+The alert evaluates server-error traffic using a rolling five-minute window:
+
+rate(...[5m])
+
+The alert also requires:
+
+for: 2m
+
+before transitioning to firing.
+
+Alertmanager uses:
+
+groupInterval: 5m
+
+Therefore firing and resolved notifications are not expected to occur
+immediately after error traffic begins or ends.
+
+
+============================================================
+RECOVERY
+============================================================
+
+Disable the controlled HTTP 500 endpoint.
+
+Host:
+eph-cp01
+
+Commands:
+
+kubectl -n havenbridge set env deployment/havenbridge-api \
+  ENABLE_OBSERVABILITY_TEST_ENDPOINTS-
+
+kubectl -n havenbridge rollout status \
+  deployment/havenbridge-api \
+  --timeout=180s
+
+
+Verify endpoint returned to disabled state.
+
+Host:
+syrus
+
+Command:
+
+curl -i https://havenbridge.lab/test/500
+
+Expected:
+
+HTTP 404
+
+
+Final recovery validation
+-------------------------
+
+Confirmed:
+
+- HavenBridge API returned to normal operation
+- controlled /test/500 endpoint was disabled
+- HTTP 500 generation stopped
+- Prometheus alert returned to healthy state
+- Grafana returned to NO ACTIVE ALERTS
+- Slack received the resolved notification
+- Discord received the resolved notification
+- API remained available
+- no recent application container restarts were introduced by the test
+
+============================================================
+GRAFANA DASHBOARD PROVISIONING VALIDATION
+============================================================
+
+The completed HavenBridge Operations Overview dashboard was exported from
+Grafana using the Dashboard V2 resource format and stored in Git as:
+
+kubernetes/platform/observability/grafana/dashboards/havenbridge-operations-overview.json
+
+The dashboard export was validated as:
+
+apiVersion:
+dashboard.grafana.app/v2
+
+kind:
+Dashboard
+
+title:
+HavenBridge — Operations Overview
+
+panel count:
+10
+
+
+Kustomize validation
+--------------------
+
+Host:
+eph-cp01
+
+The dashboard directory was rendered using:
+
+kubectl kustomize /tmp/havenbridge-grafana-dashboards
+
+Kustomize successfully generated both:
+
+havenbridge-api-grafana-dashboard
+
+and:
+
+havenbridge-operations-grafana-dashboard
+
+
+Kubernetes ConfigMap validation
+-------------------------------
+
+The dashboard ConfigMaps were applied using:
+
+kubectl apply -k /tmp/havenbridge-grafana-dashboards
+
+Observed:
+
+configmap/havenbridge-api-grafana-dashboard unchanged
+configmap/havenbridge-operations-grafana-dashboard created
+
+The new ConfigMap was confirmed to contain:
+
+grafana_dashboard=1
+
+and the dashboard data key:
+
+havenbridge-operations-overview.json
+
+
+Grafana sidecar validation
+--------------------------
+
+The running Grafana Pod contains:
+
+grafana-sc-dashboard
+grafana-sc-datasources
+grafana
+
+The dashboard sidecar reported:
+
+Writing /tmp/dashboards/havenbridge-operations-overview.json
+
+Grafana provisioning then returned:
+
+Dashboards config reloaded
+
+HTTP response:
+
+200 OK
+
+
+Provisioning result:
+
+PASS
+
+Validated flow:
+
+Dashboard JSON in Git
+        ↓
+Kustomize
+        ↓
+Kubernetes ConfigMap
+        ↓
+grafana_dashboard=1
+        ↓
+grafana-sc-dashboard
+        ↓
+Grafana dashboard provisioning reload
+        ↓
+HavenBridge — Operations Overview
+
+
+============================================================
+PHASE 7 VALIDATION RESULT
+============================================================
+
+Normal HTTP 200 traffic
+    PASS
+
+Controlled HTTP 404 traffic
+    PASS
+
+Controlled HTTP 500 traffic
+    PASS
+
+Prometheus metrics correlation
+    PASS
+
+Loki application-log correlation
+    PASS
+
+Prometheus alert-state correlation
+    PASS
+
+Grafana combined dashboard
+    PASS
+
+Slack firing and resolved delivery
+    PASS
+
+Discord firing and resolved delivery
+    PASS
+
+Application recovery
+    PASS
+
+
+Final result:
+
+Observability Phase 7 successfully demonstrated end-to-end correlation between
+HavenBridge application behavior, Prometheus metrics, Loki logs, Grafana
+visualization, Prometheus alert rules, Alertmanager and external notification
+channels.
