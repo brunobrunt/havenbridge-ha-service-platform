@@ -761,21 +761,36 @@ Incident cause becomes easier to identify
 
 ### Observability Phase 8 — Incident Simulation
 
-Controlled failure scenarios may include:
+**Status: complete**
+
+Phase 8 used controlled failure scenarios to validate how HavenBridge behaves
+during realistic application and dependency incidents.
+
+The following scenarios were completed:
+
+- [x] Incident 1 — Degraded API Replica Availability
+- [x] Incident 2 — Complete API Unavailability
+- [x] Incident 3 — PostgreSQL Connectivity Failure
+
+The operational workflow validated during these incidents was:
 
 ```text
-Scale HavenBridge API down
-Restart an API Pod
-Temporarily break a readiness condition
-Generate HTTP errors
-Generate application traffic
-Observe Pod restart behavior
-Simulate PostgreSQL unavailability where safe
+Detect
+  ↓
+Observe
+  ↓
+Investigate
+  ↓
+Correlate metrics + logs + Kubernetes state
+  ↓
+Identify root cause
+  ↓
+Recover
+  ↓
+Verify
+  ↓
+Document
 ```
-
-The purpose is to prove that the observability stack can detect real changes in
-platform behavior.
-
 ---
 
 ## Observability Repository Structure
@@ -3055,12 +3070,26 @@ Phase 7 validation evidence will be preserved in:
 kubernetes/platform/observability/evidence/havenbridge-combined-dashboard-validation.txt
 ```
 
-The next observability phase is:
+Observability Phase 8 — Incident Simulation is complete.
+
+The next HavenBridge work moves into:
 
 ```text
-Observability Phase 8 — Incident Simulation
+Phase 9 — Application and Operational Maturity
 ```
 
-Phase 8 will move beyond controlled HTTP traffic and introduce realistic
-application and Kubernetes failure scenarios that require detection,
-investigation, root-cause identification, recovery and validation.
+Phase 9 will build on the operational findings from incident simulation,
+including application readiness improvements, additional resilience testing,
+PostgreSQL backup and recovery, application expansion and further operational
+runbooks.
+
+The PostgreSQL connectivity incident specifically identified a future
+application improvement:
+
+```text
+/health/ready
+```
+
+The readiness endpoint should eventually validate critical application
+dependencies such as PostgreSQL, rather than reporting readiness based only on
+the FastAPI process being available.

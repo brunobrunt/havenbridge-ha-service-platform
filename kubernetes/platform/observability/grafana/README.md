@@ -1009,6 +1009,445 @@ Permanent dashboard changes should therefore be reflected in the repository
 rather than existing only as manual changes in the Grafana UI.
 
 
+### Updating a Git-Managed Grafana Dashboard
+
+HavenBridge Grafana dashboards are provisioned from Kubernetes ConfigMaps and
+stored permanently in Git.
+
+The repository is therefore the source of truth for dashboard configuration.
+
+The dashboard flow is:
+
+```text
+Git dashboard JSON
+        ↓
+Kustomize
+        ↓
+Kubernetes ConfigMap
+        ↓
+grafana-sc-dashboard sidecar
+        ↓
+Grafana
+```
+
+Grafana is configured so provisioned dashboards cannot be permanently modified
+directly through the Grafana UI.
+
+When attempting to save a provisioned dashboard, Grafana reports:
+
+```text
+This dashboard cannot be saved from the Grafana UI because it has been
+provisioned from another source.
+```
+
+This behavior is intentional.
+
+It prevents a dashboard edited manually in Grafana from silently becoming
+different from the version stored in Git.
+
+The configuration therefore follows this principle:
+
+```text
+Grafana UI
+    = dashboard development and testing
+
+Git
+    = permanent dashboard source of truth
+```
+
+#### Future Dashboard Update Workflow
+
+Whenever an existing HavenBridge Grafana dashboard is changed, including:
+
+```text
+adding a panel
+changing a PromQL query
+changing a LogQL query
+changing thresholds
+changing value mappings
+changing descriptions
+changing panel visualization settings
+changing dashboard layout
+```
+
+use the following workflow.
+
+```text
+Edit dashboard in Grafana
+        ↓
+test the change
+        ↓
+attempt Save
+        ↓
+Grafana reports dashboard is provisioned
+        ↓
+Save JSON to file
+        ↓
+validate exported JSON
+        ↓
+replace Git-managed dashboard JSON
+        ↓
+remove Grafana runtime metadata
+        ↓
+validate repository copy
+        ↓
+copy dashboard to eph-cp01 temporary apply directory
+        ↓
+kubectl apply -k
+        ↓
+ConfigMap updated
+        ↓
+grafana-sc-dashboard detects change
+        ↓
+Grafana provisioning reload
+        ↓
+refresh dashboard
+        ↓
+verify new configuration persists
+```
+
+#### Step 1 — Edit and Test the Dashboard
+
+Use the Grafana UI to create or modify the required panel.
+
+Before exporting, validate that the new panel behaves correctly.
+
+For example, confirm:
+
+```text
+query returns expected data
+visualization type is correct
+title and description are present
+thresholds are correct
+value mappings are correct
+healthy and failure states behave as expected
+```
+
+The Grafana UI should be treated as the dashboard development environment.
+
+#### Step 2 — Export the Updated Dashboard
+
+When the dashboard is ready, click:
+
+```text
+Save
+```
+
+Because the dashboard is provisioned, Grafana will not save it directly.
+
+In the Save dashboard dialog use:
+
+```text
+Model:  V2 Resource
+Format: JSON
+```
+
+Then select:
+
+```text
+Save JSON to file
+```
+
+Grafana downloads a new dashboard JSON file to `syrus`.
+
+A typical downloaded file looks similar to:
+
+```text
+~/Downloads/HavenBridge — Operations Overview-<timestamp>.json
+```
+
+The timestamp changes with each export.
+
+#### Step 3 — Identify the New Export
+
+Run on `syrus`:
+
+```bash
+ls -lt ~/Downloads/*.json | head
+```
+
+The newest HavenBridge Operations Overview JSON file should appear first.
+
+To avoid repeatedly typing the long filename, store it temporarily in a shell
+variable.
+
+Example:
+
+```bash
+FILE="$HOME/Downloads/HavenBridge — Operations Overview-<timestamp>.json"
+```
+
+`FILE` is only a convenience variable for the current shell session.
+
+#### Step 4 — Validate the Export
+
+Confirm that the expected number of panels exists.
+
+Run on `syrus`:
+
+```bash
+jq '[.spec.elements[] | select(.kind == "Panel")] | length' "$FILE"
+```
+
+When validating a specific newly added panel, its title can also be searched.
+
+Example:
+
+```bash
+grep -n 'PostgreSQL' "$FILE"
+```
+
+The purpose of these checks is:
+
+```text
+confirm correct export
+        ↓
+confirm expected panels
+        ↓
+only then modify Git source
+```
+
+#### Step 5 — Replace the Git Dashboard JSON
+
+The Git-managed Operations Overview dashboard is:
+
+```text
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/platform/observability/grafana/dashboards/havenbridge-operations-overview.json
+```
+
+Run on `syrus`:
+
+```bash
+cp "$FILE" \
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/platform/observability/grafana/dashboards/havenbridge-operations-overview.json
+```
+
+#### Step 6 — Remove Grafana Runtime Metadata
+
+Grafana exports runtime metadata that should not be treated as permanent
+repository configuration.
+
+Examples include:
+
+```text
+runtime UID values
+resource versions
+generation numbers
+creation timestamps
+update timestamps
+Grafana session metadata
+```
+
+HavenBridge keeps the stable dashboard resource name while removing this
+runtime metadata.
+
+Run on `syrus`:
+
+```bash
+jq '
+  .metadata = {
+    "name": .metadata.name
+  }
+' \
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/platform/observability/grafana/dashboards/havenbridge-operations-overview.json \
+> /tmp/havenbridge-operations-overview-clean.json
+```
+
+Then replace the repository copy:
+
+```bash
+mv /tmp/havenbridge-operations-overview-clean.json \
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/platform/observability/grafana/dashboards/havenbridge-operations-overview.json
+```
+
+#### Step 7 — Validate the Repository Copy
+
+For example, verify the dashboard panel count:
+
+```bash
+jq '[.spec.elements[] | select(.kind == "Panel")] | length' \
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/platform/observability/grafana/dashboards/havenbridge-operations-overview.json
+```
+
+Additional validation can be performed with `grep` when a specific query or
+panel change needs to be confirmed.
+
+For example:
+
+```bash
+grep -n '\[5m\]' \
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/platform/observability/grafana/dashboards/havenbridge-operations-overview.json
+```
+
+#### Step 8 — Copy the Dashboard to the Control Plane
+
+The Git repository on `syrus` remains the source of truth.
+
+The directory on `eph-cp01` is only a temporary Kubernetes apply location.
+
+```text
+syrus repository
+    = permanent source of truth
+
+/tmp/havenbridge-grafana-dashboards on eph-cp01
+    = temporary deployment copy
+```
+
+Run on `syrus`:
+
+```bash
+scp \
+/home/alabi/projects/havenbridge-ha-service-platform/kubernetes/platform/observability/grafana/dashboards/havenbridge-operations-overview.json \
+mino@172.16.10.31:/tmp/havenbridge-grafana-dashboards/havenbridge-operations-overview.json
+```
+
+#### Step 9 — Update the Kubernetes ConfigMap
+
+Run on `eph-cp01`:
+
+```bash
+kubectl apply -k /tmp/havenbridge-grafana-dashboards
+```
+
+For an existing dashboard, the expected result is similar to:
+
+```text
+configmap/havenbridge-api-grafana-dashboard unchanged
+configmap/havenbridge-operations-grafana-dashboard configured
+```
+
+`configured` indicates that Kubernetes updated the existing Operations
+Overview ConfigMap.
+
+#### Step 10 — Validate the Kubernetes Dashboard Copy
+
+The dashboard JSON stored in the ConfigMap can be inspected to confirm that the
+expected version reached Kubernetes.
+
+Example panel-count validation on `eph-cp01`:
+
+```bash
+kubectl -n observability get configmap \
+  havenbridge-operations-grafana-dashboard \
+  -o json \
+| jq -r '.data["havenbridge-operations-overview.json"]' \
+| jq '[.spec.elements[] | select(.kind == "Panel")] | length'
+```
+
+#### Step 11 — Grafana Sidecar Reload
+
+The Grafana Pod contains:
+
+```text
+grafana
+grafana-sc-dashboard
+grafana-sc-datasources
+```
+
+The `grafana-sc-dashboard` sidecar watches Kubernetes ConfigMaps labelled:
+
+```text
+grafana_dashboard=1
+```
+
+When the dashboard ConfigMap changes, the sidecar writes the updated dashboard
+JSON into Grafana's provisioning directory and requests a provisioning reload.
+
+The sidecar can be validated on `eph-cp01` with:
+
+```bash
+GRAFANA_POD=$(kubectl -n observability get pods -o name \
+  | grep grafana \
+  | head -1)
+```
+
+Then:
+
+```bash
+kubectl -n observability logs \
+  "$GRAFANA_POD" \
+  -c grafana-sc-dashboard \
+  --since=10m \
+  | grep -Ei 'havenbridge|dashboard|configmap'
+```
+
+A successful update is expected to include messages similar to:
+
+```text
+Writing /tmp/dashboards/havenbridge-operations-overview.json
+```
+
+and:
+
+```text
+Dashboards config reloaded
+```
+
+#### Step 12 — Refresh Grafana
+
+If the browser still contains the previous manually edited version, Grafana may
+display:
+
+```text
+Dashboard changed
+
+The dashboard has been updated by another session.
+```
+
+At this point choose:
+
+```text
+Discard local changes
+```
+
+The browser-local edits are no longer needed because the new version has
+already been exported, stored in Git and loaded through the Kubernetes
+ConfigMap.
+
+Refresh the dashboard and verify that the new panel or configuration remains.
+
+If the change survives the refresh, the update is now persistent through the
+Git-managed provisioning process.
+
+#### Existing Dashboard Versus New Dashboard
+
+When modifying the existing:
+
+```text
+HavenBridge — Operations Overview
+```
+
+the existing Kustomize entry does not need to be changed because the same JSON
+filename and ConfigMap are being updated.
+
+If an entirely new Grafana dashboard is created, then:
+
+```text
+kubernetes/platform/observability/grafana/dashboards/kustomization.yaml
+```
+
+must also be updated so Kustomize creates a ConfigMap for the new dashboard.
+
+#### Operational Rule
+
+For HavenBridge:
+
+```text
+Do not rely on Grafana UI Save for provisioned dashboards.
+
+Edit and test in Grafana.
+Export the JSON.
+Validate the export.
+Store it in Git.
+Apply it through Kustomize.
+Allow the Grafana sidecar to reload it.
+Verify that the dashboard survives a refresh.
+```
+
+This keeps Grafana reproducible and prevents dashboard configuration from
+existing only inside the running Grafana instance.
+
+
 ### Image Export Note
 
 Grafana reported:

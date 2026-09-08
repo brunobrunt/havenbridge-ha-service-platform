@@ -1625,13 +1625,10 @@ recent pod restarts
 
 ### Phase 8 — Incident Simulation
 
-**Status: next**
+**Status: complete**
 
-With the core HavenBridge observability stack operational, the next phase will
-use controlled failure scenarios to validate how the platform behaves during
-realistic incidents.
-
-The goal is to practice the complete operational workflow:
+Controlled incident simulations were completed to validate the full HavenBridge
+operational troubleshooting workflow:
 
 ```text
 Detect
@@ -1650,7 +1647,6 @@ Verify
   ↓
 Document
 ```
-
 ---
 
 ### Phase 9 — Application and Operational Maturity
@@ -2513,48 +2509,40 @@ git diff --cached | grep -Ei \
 
 ## Next Recommended Work
 
-The next active HavenBridge phase is **Observability Phase 8 — Incident Simulation**.
+The next active HavenBridge phase is **Phase 9 — Application and Operational Maturity**.
 
-### 1. Incident Simulation
+Observability Phase 8 — Incident Simulation is complete.
 
-The goal is to move beyond controlled HTTP traffic tests and introduce
-realistic application and Kubernetes failure scenarios.
+### Completed — Incident Simulation
 
-Planned work includes:
+Phase 8 completed three controlled incident scenarios:
 
-- Simulate complete HavenBridge API unavailability.
-- Simulate degraded API replica availability.
-- Simulate PostgreSQL connectivity failure.
-- Observe Kubernetes workload and readiness changes.
-- Correlate Prometheus metrics with Loki logs.
-- Validate Prometheus alert transitions.
-- Validate Alertmanager notifications through Slack and Discord.
-- Perform controlled recovery.
-- Confirm alerts return to the resolved state.
-- Preserve incident evidence and troubleshooting steps.
+- Degraded HavenBridge API replica availability.
+- Complete HavenBridge API unavailability.
+- PostgreSQL connectivity failure.
 
-The operational workflow will be:
+The simulations validated:
+
+- detection and investigation of realistic platform failures;
+- correlation of Prometheus metrics, Loki logs and Kubernetes state;
+- degraded versus unavailable API behavior;
+- Prometheus alert firing and resolution;
+- Slack and Discord Alertmanager notifications;
+- PostgreSQL Service and EndpointSlice troubleshooting;
+- API `CrashLoopBackOff` caused by database connection timeout;
+- recovery and post-recovery validation.
+
+The PostgreSQL incident also identified an application readiness gap:
+`/health/ready` does not yet validate PostgreSQL connectivity.
+
+Detailed commands, screenshots, recovery procedures and evidence are available
+in:
 
 ```text
-Detect
-  ↓
-Observe
-  ↓
-Investigate
-  ↓
-Correlate metrics + logs + Kubernetes state
-  ↓
-Identify root cause
-  ↓
-Recover
-  ↓
-Verify
-  ↓
-Document
+kubernetes/platform/observability/incident-simulation/
 ```
 
-### 2. Application and Operational Maturity
-
+### 1. Application and Operational Maturity
 After the incident-simulation phase, continue expanding the HavenBridge
 application and improving platform resilience.
 
@@ -2572,8 +2560,7 @@ Planned work includes:
 - Validate kube-vip failover.
 - Continue Kubernetes and application security hardening.
 
-### 3. AI-Assisted Kubernetes Operations
-
+### 2. AI-Assisted Kubernetes Operations
 A later phase will introduce a secure, read-only HavenBridge operations agent.
 
 The agent will inspect:
