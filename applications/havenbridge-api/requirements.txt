@@ -26,3 +26,7 @@ email-validator==2.3.0
 # format so request, latency, process, and future business metrics can be
 # collected by the Kubernetes monitoring stack.
 prometheus-client==0.26.0
+
+# Alembic manages version-controlled PostgreSQL schema migrations so database
+# structure changes are applied deliberately instead of during API startup.
+alembic==1.19.2

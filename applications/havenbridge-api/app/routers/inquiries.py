@@ -47,7 +47,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import ServiceInquiry
+from app.models import InquiryStatusHistory, ServiceInquiry
 from app.schemas import (
     ServiceInquiryCreate,
     ServiceInquiryResponse,
@@ -281,21 +281,14 @@ def update_inquiry_status(
     db: DatabaseSession,
 ) -> ServiceInquiry:
     """
-    Update the workflow status of an existing service inquiry.
+    Update an inquiry's current status and preserve the transition history.
 
-    inquiry_id:
-        Identifies the inquiry that should be updated.
+    The service_inquiries table stores the current status.
 
-    status_update:
-        Contains the new status validated by
-        ServiceInquiryStatusUpdate.
-
-    db:
-        Contains the managed SQLAlchemy database session.
+    The inquiry_status_history table records how the status changed over time.
     """
 
     try:
-        # Retrieve the inquiry directly by its primary-key ID.
         inquiry = db.get(ServiceInquiry, inquiry_id)
 
     except SQLAlchemyError as exc:
@@ -309,24 +302,33 @@ def update_inquiry_status(
             detail="Unable to retrieve the service inquiry.",
         ) from exc
 
-    # A missing database row should be reported as HTTP 404 rather
-    # than treated as an application failure.
     if inquiry is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Service inquiry not found.",
         )
 
-    # Pydantic has already restricted this value to an approved
-    # HavenBridge workflow status.
-    inquiry.status = status_update.status
+    old_status = inquiry.status
+    new_status = status_update.status
+
+    # Do not create a fake history event when the requested status
+    # is already the inquiry's current status.
+    if old_status == new_status:
+        return inquiry
+
+    inquiry.status = new_status
+
+    history = InquiryStatusHistory(
+        inquiry_id=inquiry.id,
+        old_status=old_status,
+        new_status=new_status,
+        changed_by="api",
+    )
 
     try:
-        # Persist the status change in PostgreSQL.
+        # Both changes are part of the same transaction.
+        db.add(history)
         db.commit()
-
-        # Reload values such as updated_at after PostgreSQL performs
-        # the UPDATE.
         db.refresh(inquiry)
 
     except SQLAlchemyError as exc:

@@ -263,3 +263,39 @@ def test_updated_inquiry_status_is_returned_by_list_endpoint(
 
     assert inquiries[0]["id"] == inquiry_id
     assert inquiries[0]["status"] == "reviewing"
+
+def test_status_update_creates_history_record(
+    client: TestClient,
+    fake_db_session,
+) -> None:
+    """
+    A status update should preserve the transition in inquiry status history.
+    """
+
+    create_response = client.post(
+        "/api/v1/inquiries",
+        json=VALID_INQUIRY,
+    )
+
+    assert create_response.status_code == 201
+
+    inquiry_id = create_response.json()["id"]
+
+    update_response = client.patch(
+        f"/api/v1/inquiries/{inquiry_id}/status",
+        json={
+            "status": "reviewing",
+        },
+    )
+
+    assert update_response.status_code == 200
+
+    assert len(fake_db_session.history_records) == 1
+
+    history = fake_db_session.history_records[0]
+
+    assert history.inquiry_id == inquiry_id
+    assert history.old_status == "new"
+    assert history.new_status == "reviewing"
+    assert history.changed_by == "api"
+    assert history.changed_at is not None
