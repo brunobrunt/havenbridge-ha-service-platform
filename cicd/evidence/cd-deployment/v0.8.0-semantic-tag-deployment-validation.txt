@@ -1,0 +1,132 @@
+HavenBridge CD — v0.8.0 Semantic Tag Deployment Validation
+===========================================================
+
+Purpose
+-------
+Validate that the HavenBridge CD workflow deploys the human-readable
+semantic release tag instead of the Git commit SHA while retaining the
+immutable container image digest at runtime.
+
+Release
+-------
+Release tag:
+v0.8.0
+
+Expected deployment image:
+ghcr.io/brunobrunt/havenbridge-api:v0.8.0
+
+
+1. Kubernetes rollout validation
+--------------------------------
+
+Host:
+eph-cp01
+
+Command:
+
+kubectl -n havenbridge rollout status deployment/havenbridge-api
+
+Result:
+
+deployment "havenbridge-api" successfully rolled out
+
+
+2. Deployment availability validation
+-------------------------------------
+
+Host:
+eph-cp01
+
+Command:
+
+kubectl -n havenbridge get deployment havenbridge-api
+
+Result:
+
+NAME              READY   UP-TO-DATE   AVAILABLE   AGE
+havenbridge-api   2/2     2            2           44d
+
+
+3. HavenBridge API pod validation
+--------------------------------
+
+Host:
+eph-cp01
+
+Command:
+
+kubectl -n havenbridge get pods | grep havenbridge-api
+
+Result:
+
+havenbridge-api-b99c859b7-kgn7k   1/1   Running   0   63m
+havenbridge-api-b99c859b7-vwj9s   1/1   Running   0   63m
+
+
+4. Semantic release image validation
+------------------------------------
+
+Host:
+eph-cp01
+
+Commands:
+
+POD=$(kubectl -n havenbridge get pods -o name \
+  | grep '^pod/havenbridge-api-' \
+  | head -n1)
+
+kubectl -n havenbridge get "${POD}" \
+  -o jsonpath='Image: {.spec.containers[?(@.name=="havenbridge-api")].image}{"\n"}ImageID: {.status.containerStatuses[?(@.name=="havenbridge-api")].imageID}{"\n"}'
+
+Result:
+
+Image: ghcr.io/brunobrunt/havenbridge-api:v0.8.0
+ImageID: ghcr.io/brunobrunt/havenbridge-api@sha256:9830854685b118be4bd9a8a1a2a0048eb5a6a3d32e2a9f8f72f21f8d82e6826c
+
+
+5. CD workflow behavior
+-----------------------
+
+Previous deployment behavior:
+
+ghcr.io/brunobrunt/havenbridge-api:<git-commit-sha>
+
+Example:
+
+ghcr.io/brunobrunt/havenbridge-api:aeab8e5f81f88689f1c0e00834492500367b5023
+
+Updated deployment behavior:
+
+ghcr.io/brunobrunt/havenbridge-api:v0.8.0
+
+The CD workflow continues to use RELEASE_SHA to validate release provenance
+and confirm that the semantic release tag points to the expected Git commit.
+
+The actual Kubernetes deployment image is now constructed from RELEASE_TAG:
+
+IMAGE="ghcr.io/brunobrunt/havenbridge-api:${RELEASE_TAG}"
+
+Deployment verification also checks the semantic tag:
+
+EXPECTED="ghcr.io/brunobrunt/havenbridge-api:${RELEASE_TAG}"
+
+
+6. Validation conclusion
+------------------------
+
+PASS - HavenBridge CD successfully deployed semantic release tag v0.8.0.
+
+PASS - Kubernetes Deployment successfully rolled out.
+
+PASS - HavenBridge API replicas are 2/2 Ready and Available.
+
+PASS - Both HavenBridge API pods are Running.
+
+PASS - Kubernetes reports the deployed image as:
+       ghcr.io/brunobrunt/havenbridge-api:v0.8.0
+
+PASS - CRI-O retains the immutable image digest:
+       sha256:9830854685b118be4bd9a8a1a2a0048eb5a6a3d32e2a9f8f72f21f8d82e6826c
+
+Result:
+Semantic-version deployment is successfully validated.

@@ -1,11 +1,23 @@
 # HavenBridge CI/CD
 
 This directory documents the Continuous Integration and Continuous Deployment
-architecture used by the HavenBridge platform.
+architecture used by the HavenBridge HA Service Platform.
 
-The purpose of the CI/CD pipeline is to automatically validate application
-changes, build container images, publish approved images to GitHub Container
-Registry and deploy approved releases to the HavenBridge Kubernetes cluster.
+The CI/CD implementation validates HavenBridge application changes, builds and
+publishes versioned container images, creates semantic application releases,
+and deploys approved releases to the private HavenBridge Kubernetes cluster.
+
+The current implementation separates:
+
+- Continuous Integration on GitHub-hosted runners.
+- Release automation on GitHub-hosted runners.
+- Continuous Deployment on a dedicated self-hosted runner.
+- Kubernetes authentication through a restricted ServiceAccount and
+  namespace-scoped RBAC.
+- Human-readable semantic release tags from Git commit provenance.
+- Runtime image identification through the immutable container digest.
+
+---
 
 ## CI/CD Architecture
 
@@ -16,48 +28,170 @@ git push / pull request
    ↓
 GitHub
    ↓
-┌──────────────────────────────────────┐
-│ GitHub-hosted runner                 │
-│                                      │
-│  CI                                  │
-│  ├─ Checkout source                  │
-│  ├─ Set up Python                    │
-│  ├─ Install dependencies             │
-│  ├─ Run tests                        │
-│  ├─ Validate Docker build            │
-│  └─ Validate Kubernetes manifests    │
-└─────────────────┬────────────────────┘
-                  ↓
-             main approved
-                  ↓
-             Build image
-                  ↓
-                GHCR
-                  ↓
-┌──────────────────────────────────────┐
-│ Self-hosted HavenBridge runner       │
-│                                      │
-│  CD                                  │
-│  ├─ Pull/deploy approved version     │
-│  ├─ kubectl apply / update image     │
-│  ├─ Watch rollout                    │
-│  └─ HTTPS health validation          │
-└─────────────────┬────────────────────┘
-                  ↓
-          HavenBridge Kubernetes
+┌───────────────────────────────────────────────┐
+│ HavenBridge CI                               │
+│ GitHub-hosted runner                         │
+│                                               │
+│  ├─ Checkout source                          │
+│  ├─ Set up Python                            │
+│  ├─ Install dependencies                     │
+│  ├─ Run FastAPI tests                        │
+│  ├─ Validate Docker build                    │
+│  └─ Validate Kubernetes manifests            │
+└──────────────────────┬────────────────────────┘
+                       ↓
+                 CI succeeds
+                       ↓
+┌───────────────────────────────────────────────┐
+│ HavenBridge Release                          │
+│ GitHub-hosted runner                         │
+│                                               │
+│  ├─ Determine whether a release is required  │
+│  ├─ Calculate semantic version               │
+│  ├─ Build release image                      │
+│  ├─ Publish semantic tag to GHCR             │
+│  ├─ Publish commit-SHA tag to GHCR           │
+│  └─ Create/push annotated Git tag            │
+└──────────────────────┬────────────────────────┘
+                       ↓
+              successful release
+                       ↓
+┌───────────────────────────────────────────────┐
+│ HavenBridge CD                               │
+│ Self-hosted runner                           │
+│ havenbridge-runner01                         │
+│                                               │
+│  ├─ Verify release commit SHA                │
+│  ├─ Resolve semantic release tag             │
+│  ├─ Verify Kubernetes access                 │
+│  ├─ Deploy semantic-version image            │
+│  ├─ Watch Kubernetes rollout                 │
+│  └─ Verify deployed image                    │
+└──────────────────────┬────────────────────────┘
+                       ↓
+              HavenBridge Kubernetes
+                       ↓
+          ghcr.io/.../havenbridge-api:vX.Y.Z
+                       ↓
+               CRI-O image digest
 ```
 
-## What CI Means
-
-Continuous Integration validates application changes before they are accepted
-as deployable HavenBridge releases.
-
-The CI portion of the pipeline will run on a GitHub-hosted runner.
-
-Its responsibilities will include:
+The important design decision is that release provenance and the Kubernetes
+deployment reference are related but serve different purposes:
 
 ```text
-Checkout source code
+RELEASE_SHA
+    =
+exact source-code provenance and release verification
+
+RELEASE_TAG
+    =
+human-readable Kubernetes deployment version
+
+ImageID / sha256 digest
+    =
+immutable runtime container artifact
+```
+
+---
+
+## Repository Location
+
+The CI/CD implementation is maintained under:
+
+```text
+/home/alabi/projects/havenbridge-ha-service-platform
+```
+
+The primary CI/CD documentation is:
+
+```text
+cicd/README.md
+```
+
+Key workflow files are:
+
+```text
+.github/workflows/ci.yml
+.github/workflows/release.yml
+.github/workflows/cd.yml
+```
+
+The semantic-version calculator is:
+
+```text
+cicd/scripts/next-version.sh
+```
+
+The self-hosted runner implementation is documented in:
+
+```text
+cicd/self-hosted-runner/README.md
+```
+
+---
+
+## CI/CD Directory Structure
+
+```text
+cicd/
+├── README.md
+├── github-actions-simple-concepts.txt
+├── github-hosted-runners/
+│   └── README.md
+├── scripts/
+│   └── next-version.sh
+├── self-hosted-runner/
+│   ├── README.md
+│   └── evidence/
+│       ├── automated-release-no-release-validation.txt
+│       └── kubernetes-rbac-validation.txt
+└── evidence/
+    ├── ci-foundation/
+    │   ├── github-actions-ci-validation-results.txt
+    │   └── github-actions-ci-validation-steps.txt
+    ├── docker-build/
+    │   ├── github-actions-docker-build-validation-results.txt
+    │   └── github-actions-docker-build-validation-steps.txt
+    ├── ghcr-change-detection/
+    │   ├── gha-ghcr-change-detection-results.txt
+    │   └── gha-ghcr-change-detection-steps.txt
+    ├── ghcr-publication/
+    │   ├── gha-ghcr-publication-results.txt
+    │   └── gha-ghcr-publication-steps.txt
+    ├── k8s-manifest-validation/
+    │   ├── gha-k8s-manifest-validation-results.txt
+    │   └── gha-k8s-manifest-validation-steps.txt
+    ├── semver-release/
+    │   ├── gha-semver-release-results.txt
+    │   └── gha-semver-release-steps.txt
+    └── cd-deployment/
+        ├── v0.3.0-deployment-validation.txt
+        ├── v0.4.0-deployment-validation.txt
+        ├── v0.5.0-version-reporting-validation.txt
+        ├── v0.6.0-automated-semantic-release-validation.txt
+        └── v0.8.0-semantic-tag-deployment-validation.txt
+```
+
+---
+
+## What Continuous Integration Means
+
+Continuous Integration validates changes before they are treated as a
+deployable HavenBridge application release.
+
+CI answers:
+
+> Is this change technically valid enough to continue through the delivery
+> pipeline?
+
+The CI workflow performs application and deployment validation without needing
+administrative access to the private Kubernetes cluster.
+
+Typical CI flow:
+
+```text
+Checkout source
         ↓
 Set up Python
         ↓
@@ -70,962 +204,361 @@ Validate Docker build
 Validate Kubernetes manifests
 ```
 
-CI answers the question:
+CI is intentionally separated from private-cluster deployment.
 
-> Is this change safe and technically valid enough to continue through the
-> delivery pipeline?
+---
 
-## What CD Means
+## What the Release Stage Means
 
-Continuous Deployment handles delivery of an approved application version to
-the HavenBridge Kubernetes environment.
+The Release stage turns eligible application changes into an intentional,
+versioned HavenBridge application release.
 
-Because the HavenBridge Kubernetes cluster runs inside the private homelab,
-deployment requires a runner that can reach that environment.
-
-The CD portion will therefore use a HavenBridge self-hosted GitHub Actions
-runner.
-
-Its responsibilities will include:
+It is responsible for:
 
 ```text
-Receive approved release
+Determine whether application release is required
         ↓
-Deploy approved image
+Calculate semantic version
         ↓
-Update Kubernetes workload
+Build release image
         ↓
-Watch Deployment rollout
+Validate release
         ↓
-Verify Pods become Ready
+Publish semantic-version image
         ↓
-Validate HTTPS health endpoint
+Publish commit-SHA image
+        ↓
+Create annotated Git tag
+        ↓
+Push Git tag
 ```
 
-CD answers the question:
+Release automation does not mean that every repository change becomes an
+application release.
 
-> Can the approved HavenBridge release be deployed successfully and verified
+Changes such as documentation-only, CI/CD-only, or maintenance commits can
+complete without creating a new HavenBridge API version.
+
+---
+
+## What Continuous Deployment Means
+
+Continuous Deployment delivers a successfully created HavenBridge application
+release to the private Kubernetes environment.
+
+CD answers:
+
+> Can the released HavenBridge version be deployed successfully and verified
 > in Kubernetes?
+
+The CD workflow runs on the self-hosted runner because the Kubernetes API is
+inside the private homelab network.
+
+Current deployment flow:
+
+```text
+Successful HavenBridge Release
+        ↓
+Verify release SHA
+        ↓
+Find semantic Git tag for that release SHA
+        ↓
+Confirm tag points to the expected commit
+        ↓
+Self-hosted runner
+        ↓
+Restricted Kubernetes identity
+        ↓
+Deploy semantic release image
+        ↓
+Wait for rollout
+        ↓
+Verify deployed semantic image
+```
+
+---
 
 ## Why Two Runner Types Are Used
 
-“I separated CI and CD runners because CI only needed an isolated build environment, while CD required controlled access to the private Kubernetes network.”
-
-The pipeline separates public CI work from private cluster deployment.
+HavenBridge separates CI/release execution from private-cluster deployment.
 
 ```text
 GitHub-hosted runner
         =
-Build and validation environment
+build, test, validation and release publication
 
 Self-hosted HavenBridge runner
         =
-Private deployment environment
+private Kubernetes deployment
 ```
 
-The GitHub-hosted runner does not need direct administrative access to the
-HavenBridge Kubernetes cluster.
+This design limits how much private Kubernetes access is exposed to the public
+CI environment.
 
-The self-hosted runner will have controlled access to the homelab environment
-required for deployment.
+A concise explanation is:
 
-This separation reduces the amount of Kubernetes access exposed to the CI
-portion of the pipeline.
+> I separated CI and CD runners because CI only needs an isolated build
+> environment, while CD requires controlled access to the private Kubernetes
+> network.
 
-## Container Registry
+---
 
-HavenBridge container images are stored in GitHub Container Registry.
+## GitHub Actions Workflows
+
+### HavenBridge CI
+
+Path:
 
 ```text
-GitHub Actions
-      ↓
-Docker build
-      ↓
-GHCR
-      ↓
-ghcr.io/brunobrunt/havenbridge-api:<version>
-      ↓
-Kubernetes
+.github/workflows/ci.yml
 ```
 
-The existing manually published image:
+Purpose:
 
-```text
-ghcr.io/brunobrunt/havenbridge-api:0.1.0
-```
+- Test application changes.
+- Validate the Docker build.
+- Validate Kubernetes manifests.
+- Prevent invalid application changes from progressing.
 
-provides the starting point.
+### HavenBridge Release
 
-Phase 6 will automate the process that was previously performed manually.
-
-## Planned Pipeline Stages
-
-The HavenBridge CI/CD implementation will be built incrementally.
-
-### Stage 1 — CI Foundation
-
-```text
-Git push / pull request
-        ↓
-Checkout repository
-        ↓
-Set up Python
-        ↓
-Install dependencies
-        ↓
-Run tests
-```
-
-### Stage 2 — Build Validation
-
-```text
-CI succeeds
-        ↓
-Build Docker image
-        ↓
-Validate image build
-```
-
-### Stage 3 — Kubernetes Manifest Validation
-
-```text
-Application validation
-        ↓
-Validate Kubernetes YAML
-        ↓
-Reject invalid manifests
-```
-
-### Stage 4 — GHCR Publication
-
-```text
-Approved main branch
-        ↓
-Build versioned image
-        ↓
-Authenticate to GHCR
-        ↓
-Push image
-```
-
-### Stage 5 — Kubernetes Deployment
-
-```text
-Approved image
-        ↓
-Self-hosted runner
-        ↓
-Deploy to HavenBridge
-        ↓
-kubectl rollout status
-```
-
-### Stage 6 — Post-Deployment Validation
-
-```text
-Deployment completed
-        ↓
-Pods Ready
-        ↓
-Service available
-        ↓
-HTTPS health check
-        ↓
-https://havenbridge.lab/health/ready
-        ↓
-HTTP 200
-```
-
-## Final Delivery Goal
-
-The completed Phase 6 delivery path will be:
-
-```text
-Code change
-   ↓
-GitHub
-   ↓
-Automated CI
-   ↓
-Tests pass
-   ↓
-Docker image built
-   ↓
-Image published to GHCR
-   ↓
-Automated Kubernetes deployment
-   ↓
-Rollout succeeds
-   ↓
-HTTPS health validation succeeds
-```
-
-The pipeline will be implemented and validated one stage at a time rather than
-introducing the complete deployment automation at once.
-
-
-## Container Image Versioning Strategy
-
-HavenBridge uses a deliberate container image versioning strategy so that
-every published application image can be traced back to its source code and
-stable application releases can be identified using human-readable version
-numbers.
-
-The strategy combines:
-
-- Semantic Versioning for intentional application releases.
-- Git commit SHA tags for exact source-code traceability.
-
-This avoids relying only on mutable tags such as `latest`.
-
-
-### Why Container Image Versioning Matters
-
-As the HavenBridge application grows, new functionality, bug fixes, API
-changes, database changes, and operational improvements will be introduced.
-
-Without proper image versioning, it would become difficult to answer
-questions such as:
-
-    Which version of the HavenBridge API is currently deployed?
-
-    Which Git commit created the running container image?
-
-    Which image introduced a problem?
-
-    Which previous version should be used for rollback?
-
-For example, a deployment using:
-
-    ghcr.io/brunobrunt/havenbridge-api:latest
-
-does not clearly identify the application version represented by `latest`.
-
-The meaning of `latest` can change whenever another image is published.
-
-A version such as:
-
-    ghcr.io/brunobrunt/havenbridge-api:v0.3.0
-
-is easier for a human to understand.
-
-A Git SHA tag such as:
-
-    ghcr.io/brunobrunt/havenbridge-api:<git-commit-sha>
-
-provides exact source-code traceability.
-
-HavenBridge therefore plans to use both.
-
-
-### Semantic Versioning
-
-HavenBridge application releases will follow Semantic Versioning:
-
-    MAJOR.MINOR.PATCH
-
-Example:
-
-    v0.3.2
-
-Meaning:
-
-    0 = MAJOR
-    3 = MINOR
-    2 = PATCH
-
-
-### PATCH Version
-
-A PATCH version represents a backward-compatible bug fix or small correction.
-
-Example:
-
-    v0.3.0
-        ↓
-    v0.3.1
-
-Possible HavenBridge examples:
-
-    fix inquiry validation bug
-    correct API error handling
-    repair logging behavior
-    fix a small database query issue
-
-The application gains no major new capability.
-
-
-### MINOR Version
-
-A MINOR version represents new backward-compatible functionality.
-
-Example:
-
-    v0.3.1
-        ↓
-    v0.4.0
-
-Possible HavenBridge examples:
-
-    add referral functionality
-    add coordinator functionality
-    add a notification feature
-    introduce a new API endpoint
-    add a new application workflow
-
-Existing supported functionality should continue to work.
-
-
-### MAJOR Version
-
-A MAJOR version represents a significant incompatible or breaking change.
-
-Example:
-
-    v1.6.4
-        ↓
-    v2.0.0
-
-Possible HavenBridge examples:
-
-    redesign the public API in an incompatible way
-    remove previously supported API behavior
-    introduce a major application architecture change
-    introduce breaking data or integration changes
-
-Major versions should therefore be changed deliberately.
-
-
-### Why HavenBridge Currently Uses 0.x Versions
-
-HavenBridge is still under active application development.
-
-During this stage, versions may look like:
-
-    v0.1.0
-    v0.2.0
-    v0.3.0
-    v0.3.1
-    v0.4.0
-
-The `0` major version communicates that the application is still evolving.
-
-An example development history could be:
-
-    v0.1.0
-        Initial working HavenBridge API
-
-    v0.2.0
-        Add new service inquiry functionality
-
-    v0.2.1
-        Fix inquiry validation issue
-
-    v0.3.0
-        Add coordinator workflow
-
-    v0.4.0
-        Add referral functionality
-
-    v1.0.0
-        First application release considered stable
-
-The actual version changes will be based on the application changes that are
-implemented rather than automatically incrementing a version after every
-Git push.
-
-
-### A Git Push Does Not Automatically Mean a New Semantic Version
-
-Not every repository change represents a new application release.
-
-For example:
-
-    README update
-        ↓
-    git push
-
-should not automatically cause:
-
-    v0.3.0
-        ↓
-    v0.3.1
-
-Likewise, a CI workflow documentation change does not necessarily represent a
-new HavenBridge API release.
-
-Semantic versions will therefore represent intentional application releases,
-not every Git commit.
-
-
-### Git Commit SHA Image Tags
-
-Every Git commit already has a unique identifier.
-
-Example:
-
-    d277fb9...
-
-GitHub Actions exposes the commit SHA that triggered a workflow.
-
-HavenBridge can use that value as a container image tag.
-
-Conceptually:
-
-    Git commit
-        ↓
-    d277fb9...
-        ↓
-    CI tests the source
-        ↓
-    Docker image is built
-        ↓
-    image receives SHA tag
-
-Example:
-
-    ghcr.io/brunobrunt/havenbridge-api:<git-commit-sha>
-
-This creates a direct relationship:
-
-    Git source code
-        ↓
-    Git commit SHA
-        ↓
-    Docker image
-        ↓
-    Kubernetes deployment
-
-If a running image has a particular SHA tag, the exact source code used to
-create it can be located in Git.
-
-
-### Semantic Version Tag and Git SHA Tag Together
-
-An intentional HavenBridge release can have multiple tags pointing to the
-same container image.
-
-Example:
-
-                         ┌── v0.4.0
-                         │
-    Container Image ─────┤
-                         │
-                         └── <git-commit-sha>
-
-The registry could therefore contain:
-
-    ghcr.io/brunobrunt/havenbridge-api:v0.4.0
-
-and:
-
-    ghcr.io/brunobrunt/havenbridge-api:<git-commit-sha>
-
-Both tags can reference the exact same image digest.
-
-The semantic version provides:
-
-    human-readable release identification
-
-The Git SHA provides:
-
-    exact source-code traceability
-
-
-### Image Digest
-
-Container registries also identify images using an immutable content digest.
-
-Conceptually:
-
-    Human release name
-        ↓
-    v0.4.0
-
-    Source traceability
-        ↓
-    Git SHA
-
-    Exact container artifact
-        ↓
-    Image digest
-
-Example concept:
-
-    v0.4.0
-        ↓
-    <git-commit-sha>
-        ↓
-    sha256:<image-digest>
-
-The digest identifies the exact image contents.
-
-This becomes especially useful when proving exactly which artifact was
-deployed.
-
-
-### HavenBridge Tagging Policy
-
-The planned HavenBridge policy is:
-
-    Development / CI build
-        ↓
-    Git SHA identifies the source revision
-
-    Intentional application release
-        ↓
-    Semantic Version tag
-        +
-    Git SHA tag
-
-Example:
-
-    ghcr.io/brunobrunt/havenbridge-api:v0.5.0
-
-and:
-
-    ghcr.io/brunobrunt/havenbridge-api:<git-commit-sha>
-
-Both identify the same application image.
-
-
-### Why `latest` Will Not Be the Primary Deployment Version
-
-The `latest` tag is mutable.
-
-For example:
-
-    Monday:
-    latest → image A
-
-    Friday:
-    latest → image B
-
-A Kubernetes manifest containing:
-
-    image: ghcr.io/brunobrunt/havenbridge-api:latest
-
-therefore does not clearly communicate which application release was intended.
-
-HavenBridge will prefer explicit image versions.
-
-For example:
-
-    image: ghcr.io/brunobrunt/havenbridge-api:v0.5.0
-
-or an immutable image reference when appropriate.
-
-This improves:
-
-    deployment traceability
-    troubleshooting
-    rollback
-    auditability
-    operational understanding
-
-
-### Planned Git Release Tags
-
-Semantic application releases can later be represented by Git tags.
-
-Example:
-
-    git tag v0.5.0
-    git push origin v0.5.0
-
-A future GitHub Actions release workflow can respond to a Git tag matching:
-
-    v*.*.*
-
-Conceptually:
-
-    Git tag v0.5.0
-        ↓
-    GitHub Actions
-        ↓
-    Run tests
-        ↓
-    Build image
-        ↓
-    Validate Kubernetes manifests
-        ↓
-    Authenticate to GHCR
-        ↓
-    Publish image
-        ↓
-    havenbridge-api:v0.5.0
-        +
-    havenbridge-api:<git-commit-sha>
-
-
-### Current CI Versus Future Release Workflow
-
-The current workflow validates every relevant development change.
-
-Current flow:
-
-    git push / pull request
-        ↓
-    GitHub Actions
-        ↓
-    FastAPI tests
-        ↓
-    Docker build validation
-        ↓
-    Kubernetes manifest validation
-
-The future release flow will add:
-
-    approved application version
-        ↓
-    Git release tag
-        ↓
-    GitHub Actions
-        ↓
-    validated container image
-        ↓
-    GHCR publication
-
-This separates:
-
-    CI validation
-
-from:
-
-    intentional application release publication
-
-
-### Build Once Principle
-
-HavenBridge should avoid building one image for testing and then independently
-building another image for publication when the same validated artifact can be
-used.
-
-The preferred principle is:
-
-    Build once
-        ↓
-    Validate
-        ↓
-    Tag the validated image
-        ↓
-    Publish that image
-
-For the current GitHub Actions job, the Docker image is initially created as:
-
-    havenbridge-api:ci
-
-Because the Docker build, validation, and future GHCR publication steps run
-inside the same job, they run on the same GitHub-hosted runner.
-
-The already-built image therefore remains available to later steps in that
-job.
-
-A later step can tag that same image for GHCR instead of rebuilding it.
-
-
-### Planned GHCR Image Flow
-
-The planned publication flow is:
-
-    Source code
-        ↓
-    Git commit
-        ↓
-    GitHub Actions
-        ↓
-    pytest
-        ↓
-    6 tests pass
-        ↓
-    Docker build
-        ↓
-    havenbridge-api:ci
-        ↓
-    Kubeconform
-        ↓
-    9 Kubernetes resources valid
-        ↓
-    GHCR authentication
-        ↓
-    Tag validated image
-        ↓
-    ghcr.io/brunobrunt/havenbridge-api:<git-commit-sha>
-        ↓
-    Push to GHCR
-
-For an intentional semantic release, the same image can additionally receive:
-
-    ghcr.io/brunobrunt/havenbridge-api:v0.x.x
-
-
-### Kubernetes Deployment Versioning
-
-The deployed Kubernetes workload should eventually reference an explicit
-approved application version.
-
-Example:
-
-    containers:
-      - name: havenbridge-api
-        image: ghcr.io/brunobrunt/havenbridge-api:v0.5.0
-
-This makes the desired application version visible directly in the
-Kubernetes Deployment definition.
-
-The running system can then be reasoned about as:
-
-    Git release
-        ↓
-    v0.5.0
-        ↓
-    GHCR image
-        ↓
-    Kubernetes Deployment
-        ↓
-    HavenBridge API Pods
-
-
-### Rollback Example
-
-Suppose:
-
-    v0.5.0
-
-is deployed successfully.
-
-Later:
-
-    v0.6.0
-
-is released but introduces an application problem.
-
-Because releases are explicitly versioned, HavenBridge can identify the
-previous known-good version:
-
-    v0.5.0
-
-Conceptually:
-
-    v0.6.0
-    problem detected
-        ↓
-    identify previous known-good version
-        ↓
-    v0.5.0
-        ↓
-    redeploy
-        ↓
-    verify rollout
-        ↓
-    verify HTTPS health
-
-This is significantly safer and easier to understand than trying to determine
-which historical image an old `latest` tag represented.
-
-
-### Versioning and Database Changes
-
-Application versioning becomes particularly important when future HavenBridge
-versions introduce database schema changes.
-
-For example:
-
-    v0.6.0
-        ↓
-    application change
-        +
-    database migration
-
-A rollback may then require consideration of both:
-
-    application image compatibility
-
-and:
-
-    database schema compatibility
-
-Database migration strategy will therefore be handled deliberately when
-HavenBridge reaches that application maturity stage.
-
-
-### Current Implementation Status
-
-Implemented:
-
-    GitHub Actions CI
-    FastAPI automated tests
-    Docker image build validation
-    Kubernetes manifest validation
-    GHCR package write permission
-
-Planned next:
-
-    GHCR authentication
-    Git SHA image tagging
-    GHCR image publication
-    publication validation
-
-Planned later:
-
-    semantic Git release tags
-    automated semantic release publication
-    Kubernetes deployment automation
-    rollback automation
-
-
-### Interview Talking Point
-
-A concise explanation of the HavenBridge image versioning strategy is:
-
-    "I designed the container release strategy to combine Semantic Versioning
-    with Git commit SHA tags. Semantic versions such as v0.4.0 identify
-    intentional application releases, while SHA tags provide exact
-    source-code traceability. I avoid relying on latest as the deployment
-    version because it is mutable. The CI pipeline follows a build-once
-    approach so the image that passes validation is the same artifact that is
-    later tagged and published to GHCR."
-
-
-## Semantic Version Release Automation
-
-HavenBridge uses a separate GitHub Actions Release workflow for intentional
-application releases.
-
-Workflow:
+Path:
 
 ```text
 .github/workflows/release.yml
 ```
 
-Earlier HavenBridge releases used a manual semantic-version process:
+Purpose:
+
+- Operate on the source revision validated by CI.
+- Determine whether the change requires an application release.
+- Calculate the next semantic version.
+- Build the release image.
+- Publish both semantic-version and commit-SHA tags to GHCR.
+- Create and push the annotated Git release tag.
+
+The workflow also retains manual execution as a fallback where configured.
+
+### HavenBridge CD
+
+Path:
 
 ```text
-Human selects semantic version
-        ↓
-Create annotated Git tag
-        ↓
-Push Git tag to GitHub
-        ↓
-HavenBridge Release workflow
+.github/workflows/cd.yml
 ```
+
+Purpose:
+
+- React only to a successful HavenBridge Release.
+- Verify whether a semantic application release was actually created.
+- Validate release provenance.
+- Deploy the semantic-version image.
+- Wait for the Kubernetes rollout.
+- Verify that Kubernetes references the expected release tag.
+
+---
+
+## Container Registry
+
+HavenBridge container images are stored in GitHub Container Registry:
+
+```text
+ghcr.io/brunobrunt/havenbridge-api
+```
+
+A semantic release is represented by a human-readable image tag such as:
+
+```text
+ghcr.io/brunobrunt/havenbridge-api:v0.8.0
+```
+
+The same release can also retain a Git commit SHA tag for source-code
+traceability.
+
+Example:
+
+```text
+Semantic release:
+ghcr.io/brunobrunt/havenbridge-api:v0.8.0
+
+Source revision:
+ghcr.io/brunobrunt/havenbridge-api:<git-commit-sha>
+```
+
+Both tags can identify the same underlying container image.
+
+---
+
+## Container Image Versioning Strategy
+
+HavenBridge combines three identifiers:
+
+1. Semantic version.
+2. Git commit SHA.
+3. Immutable container digest.
+
+They have different purposes.
+
+```text
+Semantic version
+v0.8.0
+        ↓
+human-readable application release
+
+Git commit SHA
+<40-character-sha>
+        ↓
+source-code provenance
+
+Container digest
+sha256:<digest>
+        ↓
+exact immutable runtime artifact
+```
+
+The design avoids using `latest` as the primary production-style deployment
+reference because `latest` is mutable and does not communicate which release
+is intended.
+
+---
+
+## Semantic Versioning
+
+HavenBridge application releases follow:
+
+```text
+MAJOR.MINOR.PATCH
+```
+
+Example:
+
+```text
+v0.8.0
+```
+
+### PATCH
+
+A PATCH release represents a backward-compatible bug fix or correction.
+
+Example:
+
+```text
+v0.8.0
+    ↓
+v0.8.1
+```
+
+Typical HavenBridge examples include:
+
+- Fixing request validation.
+- Correcting API error handling.
+- Fixing logging behavior.
+- Correcting a small database query issue.
+
+### MINOR
+
+A MINOR release represents new backward-compatible functionality.
+
+Example:
+
+```text
+v0.8.1
+    ↓
+v0.9.0
+```
+
+Typical examples include:
+
+- Adding a new API endpoint.
+- Adding referral functionality.
+- Adding coordinator functionality.
+- Adding a new application workflow.
+
+### MAJOR
+
+A MAJOR release represents an incompatible or deliberately breaking change.
+
+Example:
+
+```text
+v1.6.4
+    ↓
+v2.0.0
+```
+
+Possible examples include:
+
+- Incompatible API redesign.
+- Removal of previously supported behavior.
+- Major application architecture changes.
+- Breaking integration or data-model changes.
+
+---
+
+## Why HavenBridge Uses 0.x Versions
+
+HavenBridge is still under active development.
+
+Versions such as:
+
+```text
+v0.3.0
+v0.4.0
+v0.5.0
+v0.6.0
+v0.8.0
+```
+
+communicate that the application and delivery platform are still evolving.
+
+A future `v1.0.0` can represent the point at which the HavenBridge application
+is considered stable enough for its first major baseline.
+
+---
+
+## A Git Push Does Not Automatically Mean an Application Release
+
+Repository activity and application releases are deliberately separated.
 
 For example:
 
-```bash
-git tag -a v0.5.0 \
-  -m "HavenBridge v0.5.0 - automatic application version reporting"
-
-git push origin v0.5.0
-```
-
-This manual process was useful while the Git tag, Release workflow, GHCR image,
-and CD relationship were being learned and validated.
-
-The release process is now being changed so that semantic-version calculation
-and Git-tag creation are automated.
-
-The Release workflow is started intentionally with:
-
-```yaml
-on:
-  workflow_dispatch:
-```
-
-This keeps a human release-approval point while removing the need to manually
-calculate, create, and push the next semantic version.
-
-The new release flow is:
-
 ```text
-Application change committed
+README update
         ↓
-Push to main
+git push
         ↓
-HavenBridge CI
+CI validation
         ↓
-CI succeeds
-        ↓
-Human starts HavenBridge Release
-        ↓
-Calculate next semantic version
-        ↓
-Run API tests
-        ↓
-Build release image
-        ↓
-Validate Kubernetes manifests
-        ↓
-Push release image to GHCR
-        ↓
-Create annotated Git tag automatically
-        ↓
-Push Git tag automatically
-        ↓
-Release workflow succeeds
-        ↓
-Existing HavenBridge CD workflow
+no HavenBridge API release required
 ```
 
-The human decides **when** to release.
+Likewise, changes limited to CI/CD documentation or workflow maintenance should
+not automatically increase the HavenBridge application version.
 
-The automation determines **what the next application version should be**.
+Semantic versions represent application releases rather than every Git commit.
 
-### Semantic Version Calculator
+---
 
-The version-calculation logic is stored separately from the GitHub Actions
-workflow:
+## Semantic Version Calculator
+
+Path:
 
 ```text
 cicd/scripts/next-version.sh
 ```
 
-The Release workflow calls it with:
+The calculator examines HavenBridge API application history and applies release
+rules based on conventional commits.
 
-```yaml
-- name: Determine next semantic version
-  id: version
-  run: bash "$GITHUB_WORKSPACE/cicd/scripts/next-version.sh"
-```
-
-The script examines committed Git history after the latest semantic-version
-tag.
-
-Important:
+Current release rules include:
 
 ```text
-The script examines COMMITTED Git history only.
-
-It does not inspect uncommitted or unstaged working-directory changes.
-```
-
-The current release rules are:
-
-```text
-feat:   → MINOR
 fix:    → PATCH
+feat:   → MINOR
 feat!:  → MAJOR
 ```
 
-Examples:
-
-```text
-Latest release: v0.5.0
-
-feat: add referral workflow
-        ↓
-Next release: v0.6.0
-```
-
-```text
-Latest release: v0.6.0
-
-fix: correct inquiry validation
-        ↓
-Next release: v0.6.1
-```
-
-Commits such as:
+Non-release changes such as:
 
 ```text
 docs:
@@ -1035,435 +568,166 @@ chore:
 
 do not create an application release by themselves.
 
-### API-Specific Version Calculation
+The calculator exposes values to GitHub Actions through `GITHUB_OUTPUT`.
 
-HavenBridge contains application, Kubernetes, Terraform, Ansible, CI/CD,
-observability and other platform code in the same repository.
+---
 
-Semantic versions such as:
+## No-Release Guard
 
-```text
-v0.7.1
-v0.8.0
-v1.0.0
-```
-
-represent **HavenBridge API application releases**.
-
-They do not represent every change made anywhere in the repository.
-
-The semantic-version calculator therefore limits release-causing Git history
-to:
+The release process includes an explicit no-release path.
 
 ```text
-applications/havenbridge-api
-```
-
-The implementation in:
-
-```text
-cicd/scripts/next-version.sh
-```
-
-uses:
-
-```bash
-git log \
-  "${LATEST_TAG}..HEAD" \
-  --pretty='%s%n%b' \
-  -- applications/havenbridge-api
-```
-
-The path at the end of the command is important:
-
-```text
--- applications/havenbridge-api
-```
-
-It tells Git:
-
-```text
-Look at commits after the latest release tag,
-but only consider commits that changed the HavenBridge API application.
-```
-
-The resulting release model is:
-
-```text
-API application changed
-        |
-        +---- feat: ----------------> MINOR
-        |
-        +---- fix: -----------------> PATCH
-        |
-        +---- BREAKING CHANGE ------> MAJOR
-```
-
-For example:
-
-```text
-feat(api): add referral endpoint
-```
-
-combined with a change under:
-
-```text
-applications/havenbridge-api/
-```
-
-is eligible for a MINOR application release.
-
-Likewise:
-
-```text
-fix(api): correct inquiry status validation
-```
-
-combined with an API application change is eligible for a PATCH release.
-
-Repository changes outside the API application do not create an unnecessary
-API release.
-
-Examples include:
-
-```text
-feat(observability):
-feat(terraform):
-feat(ansible):
-docs:
-chore:
-```
-
-when those commits do not modify:
-
-```text
-applications/havenbridge-api/
-```
-
-The resulting behavior is:
-
-```text
-Observability / infrastructure / documentation change
+HavenBridge CI succeeds
         ↓
-HavenBridge CI still validates the repository
+HavenBridge Release starts
         ↓
-HavenBridge Release evaluates semantic-version history
+next-version.sh
         ↓
-no release-causing API commit found
+No release-causing application commit
         ↓
 release_needed=false
         ↓
-no new API semantic version
+No semantic Git tag created
         ↓
-no unnecessary GHCR API image
+No application image deployment required
+```
+
+This behavior prevents CI/CD-only and documentation-only changes from creating
+false HavenBridge application releases.
+
+Evidence is stored in:
+
+```text
+cicd/self-hosted-runner/evidence/automated-release-no-release-validation.txt
+```
+
+---
+
+## Build-Once Principle
+
+HavenBridge follows a build-once approach where possible.
+
+```text
+Build image
         ↓
-no unnecessary Kubernetes API deployment
-```
-
-A real example occurred after Observability Phase 7.
-
-The commit:
-
-```text
-feat(observability): add combined operations dashboard
-```
-
-added the HavenBridge Operations Overview dashboard and observability
-documentation but did not modify:
-
-```text
-applications/havenbridge-api/
-```
-
-The current API release therefore correctly remained:
-
-```text
-v0.7.1
-```
-
-instead of incorrectly becoming:
-
-```text
-v0.8.0
-```
-
-This is intentional.
-
-The design keeps application version numbers meaningful:
-
-```text
-HavenBridge API version
-        =
-version of the HavenBridge API application
-
-not
-
-version of every infrastructure, observability,
-documentation or automation change in the repository
-```
-
-This also avoids rebuilding, publishing and redeploying an identical API
-container image when only surrounding platform components have changed.
-
-
-### Full Git History
-
-The Release workflow checks out the complete Git history:
-
-```yaml
-- name: Checkout repository
-  uses: actions/checkout@v7
-  with:
-    fetch-depth: 0
-```
-
-This is required because the version calculator needs access to previous Git
-tags and commits.
-
-Conceptually:
-
-```text
-Latest semantic tag
+Validate image
         ↓
-Committed API changes after that tag
+Tag validated image
         ↓
-Release rule
+Publish the same image
+```
+
+This avoids validating one artifact and independently rebuilding a different
+artifact for release.
+
+The release can then receive multiple identifiers:
+
+```text
+Container image
+    ├── v0.8.0
+    └── <git-commit-sha>
+```
+
+while the registry/runtime digest identifies the immutable contents.
+
+---
+
+## Git Commit SHA Image Tags
+
+The commit SHA remains an important part of the release model.
+
+A Git SHA provides a direct connection to the source revision:
+
+```text
+Git commit
         ↓
-Next semantic version
+40-character SHA
+        ↓
+release image
+        ↓
+semantic tag
 ```
 
-### Calculated Release Values
+The SHA is retained for provenance even though Kubernetes now uses the semantic
+release tag as its visible Deployment image reference.
 
-The version calculator writes values to GitHub Actions `GITHUB_OUTPUT`.
+---
 
-For a minor release, the values could be:
+## Semantic Version Tag and Git SHA Together
+
+A release can be represented by both:
 
 ```text
-bump=minor
-tag=v0.6.0
-app_version=0.6.0
+ghcr.io/brunobrunt/havenbridge-api:v0.8.0
 ```
 
-The Release workflow can then reuse them as:
+and:
 
 ```text
-steps.version.outputs.bump
-steps.version.outputs.tag
-steps.version.outputs.app_version
+ghcr.io/brunobrunt/havenbridge-api:<git-commit-sha>
 ```
 
-For example, the calculated application version is supplied to the Docker
-build:
+The semantic tag answers:
 
-```yaml
-APP_VERSION="${{ steps.version.outputs.app_version }}"
-```
+> Which HavenBridge release is this?
 
-while the calculated semantic Git/Docker tag is available as:
+The Git SHA answers:
 
-```yaml
-${{ steps.version.outputs.tag }}
-```
+> Which exact source revision produced this release?
 
-### Automatic Git Tag Creation
+---
 
-After the release image has passed its tests and validation and has been
-published, GitHub Actions creates the annotated source-code tag:
+## Image Digest
 
-```bash
-TAG="${{ steps.version.outputs.tag }}"
+CRI-O and the container registry identify the exact image artifact using a
+content digest.
 
-git config user.name "github-actions[bot]"
-git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-git tag -a "${TAG}" \
-  -m "HavenBridge ${TAG}"
-
-git push origin "${TAG}"
-```
-
-This replaces the previous manual commands:
+Example from the validated `v0.8.0` deployment:
 
 ```text
-git tag -a v0.x.x ...
-git push origin v0.x.x
+Image:
+ghcr.io/brunobrunt/havenbridge-api:v0.8.0
+
+ImageID:
+ghcr.io/brunobrunt/havenbridge-api@sha256:9830854685b118be4bd9a8a1a2a0048eb5a6a3d32e2a9f8f72f21f8d82e6826c
 ```
 
-The Release workflow requires:
+The semantic tag is operationally readable while the digest remains immutable.
 
-```yaml
-permissions:
-  contents: write
-  packages: write
-```
+---
 
-`packages: write` permits GHCR publication.
+## Current HavenBridge Tagging Policy
 
-`contents: write` permits the workflow to push the automatically created Git
-tag back to the repository.
-
-### Git Tag and Container Image Tag
-
-The two tags serve different purposes:
+The current strategy is:
 
 ```text
-Git tag
-v0.6.0
-    ↓
-Marks the released source-code commit
+Application release
+        ↓
+Semantic version calculated
+        ↓
+Release image built
+        ↓
+Image receives semantic version tag
+        +
+Image receives Git SHA tag
+        ↓
+Both published to GHCR
+        ↓
+CD verifies SHA provenance
+        ↓
+CD deploys semantic tag
+        ↓
+CRI-O records immutable digest
 ```
 
-```text
-Container image tag
-ghcr.io/brunobrunt/havenbridge-api:v0.6.0
-    ↓
-Identifies the released container image
-```
-
-The release image also retains a commit-SHA tag for exact source-code
-traceability.
-
-### No Release-Causing Commit
-
-If no committed HavenBridge API change matches the release rules, the version
-calculator stops the release:
-
-```text
-No release-causing commit found. Release stopped.
-```
-
-This behavior has been validated locally.
-
-It prevents documentation-only, infrastructure-only, or other non-release
-changes from accidentally creating a new HavenBridge API version.
-
-
-### Current Validation Status
-
-The HavenBridge automated semantic-version release implementation has now
-completed its first full end-to-end validation.
-
-The first automated semantic release was:
-
-```text
-v0.6.0
-```
-
-Application commit:
-
-```text
-9df2c05d4c18ccb97ebb8ee0b039fcad16e90ad6
-```
-
-Commit message:
-
-```text
-feat: add service inquiry lookup endpoint
-```
-
-The semantic-version calculator evaluated the committed application change and
-produced:
-
-```text
-Latest release: v0.5.0
-Release type:  minor
-Next release:  v0.6.0
-```
-
-The complete validation results were:
-
-```text
-Semantic-version script Bash syntax          PASS
-API-specific Git-history filtering           PASS
-No-release negative guard                    PASS
-Automatic MINOR version calculation          PASS
-Automatic v0.6.0 calculation                 PASS
-GHCR v0.6.0 publication                      PASS
-Automatic annotated Git-tag creation         PASS
-Automatic Git-tag push                       PASS
-Release-to-CD workflow chaining              PASS
-Self-hosted CD runner deployment              PASS
-Exact commit-SHA Kubernetes deployment        PASS
-Running API reports version 0.6.0             PASS
-GET inquiry-by-ID feature validation          PASS
-```
-
-The automatically created Git tag was verified with:
-
-```text
-Tag:     v0.6.0
-Tagger:  github-actions[bot]
-Commit:  9df2c05d4c18ccb97ebb8ee0b039fcad16e90ad6
-```
-
-Kubernetes deployed:
-
-```text
-ghcr.io/brunobrunt/havenbridge-api:9df2c05d4c18ccb97ebb8ee0b039fcad16e90ad6
-```
-
-The running application reported:
-
-```text
-"version": "0.6.0"
-```
-
-The released application feature was also successfully validated through the
-HavenBridge Gateway:
-
-```text
-GET /api/v1/inquiries/1
-```
-
-returned an existing persisted PostgreSQL service inquiry.
-
-The complete validation evidence is stored at:
-
-```text
-cicd/evidence/cd-deployment/v0.6.0-automated-semantic-release-validation.txt
-```
-
-The earlier manually created semantic releases remain valid historical release
-evidence, while `v0.6.0` represents the first successfully validated
-automatically calculated and automatically tagged HavenBridge release.
-
-
-## Continuous Deployment Implementation
-
-HavenBridge now has a working continuous deployment workflow that
-deploys approved application releases from GitHub Container Registry
-into the private Kubernetes cluster.
-
-Workflow:
-
-```text
-.github/workflows/cd.yml
-```
-
-Unlike CI and Release, CD does not execute on a GitHub-hosted runner.
-
-It targets the dedicated self-hosted runner:
-
-```text
-havenbridge-runner01
-```
-
-using:
-
-```yaml
-runs-on:
-  - self-hosted
-  - havenbridge-cd
-```
-
-This is required because the Kubernetes API exists inside the private
-HavenBridge homelab network.
+---
 
 ## Release-to-CD Trigger
 
-The CD workflow is not triggered directly by every push to `main`.
+The CD workflow is triggered by completion of the `HavenBridge Release`
+workflow rather than directly by every normal push to `main`.
 
-Instead, it waits for the `HavenBridge Release` workflow to finish:
+Conceptually:
 
 ```yaml
 on:
@@ -1474,119 +738,126 @@ on:
       - completed
 ```
 
-The deployment job runs only when the Release workflow succeeded:
+The CD workflow first determines whether the successful Release run actually
+created a semantic-version application release.
+
+If no release tag exists for the release commit, CD finishes without changing
+the Kubernetes workload.
+
+This prevents a successful no-op Release run from redeploying the application.
+
+---
+
+## Release Verification Before Deployment
+
+CD receives the release source SHA from the completed Release workflow:
 
 ```yaml
-if: ${{ github.event.workflow_run.conclusion == 'success' }}
+RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
 ```
 
-The resulting flow is:
+It also resolves the semantic release tag associated with that commit.
+
+The release verification stage checks that:
 
 ```text
-Application changes
+RELEASE_SHA is a valid Git SHA
         ↓
-Push to main
+semantic release tag exists
         ↓
-HavenBridge CI
+tag resolves to RELEASE_SHA
         ↓
-Tests + build + manifest validation
-        ↓
-Manual release decision
-        ↓
-Semantic Git tag
-        ↓
-HavenBridge Release
-        ↓
-Release image published to GHCR
-        ↓
-Release workflow succeeds
-        ↓
-HavenBridge CD
-        ↓
-Self-hosted runner
-        ↓
-Kubernetes deployment
+release is eligible for deployment
 ```
 
-This prevents a failed release from reaching the Kubernetes environment.
+This means semantic-tag deployment does not remove source-code provenance.
+
+Instead:
+
+```text
+RELEASE_SHA
+        =
+provenance validation
+
+RELEASE_TAG
+        =
+deployment reference
+```
+
+---
 
 ## CD Runner Identity
 
-The deployment job executes on:
+The deployment job runs on:
 
 ```text
 havenbridge-runner01
 IP: 172.16.10.37
 ```
 
-The GitHub Actions service runs under the dedicated Linux account:
+The GitHub Actions service runs as:
 
 ```text
 github-runner
 ```
 
-The runner is registered with GitHub using the custom label:
+The runner uses the custom GitHub Actions label:
 
 ```text
 havenbridge-cd
 ```
 
-and runs persistently as the systemd service:
+The runner service is:
 
 ```text
 actions.runner.brunobrunt-havenbridge-ha-service-platform.havenbridge-runner01.service
 ```
 
-The service was validated as:
-
-```text
-enabled
-active
-```
-
-and successfully reported:
+The service has been validated as enabled and active and has successfully
+reported:
 
 ```text
 Connected to GitHub
 Listening for Jobs
 ```
 
-Detailed runner implementation is documented at:
+Detailed implementation:
 
 ```text
 cicd/self-hosted-runner/README.md
 ```
 
+---
+
 ## Restricted Kubernetes Authentication
 
-The GitHub Actions runner does not use Kubernetes administrator
-credentials.
+The self-hosted runner does not use Kubernetes administrator credentials.
 
-The runner uses the restricted kubeconfig:
+The runner uses:
 
 ```text
 /home/github-runner/.kube/config
 ```
 
-The kubeconfig is owned by:
+Ownership:
 
 ```text
 github-runner:github-runner
 ```
 
-with permissions:
+Permissions:
 
 ```text
 600
 ```
 
-It authenticates to Kubernetes as:
+The Kubernetes identity is:
 
 ```text
 system:serviceaccount:havenbridge:havenbridge-deployer
 ```
 
-The Kubernetes identity is implemented using:
+The identity is implemented with:
 
 ```text
 ServiceAccount
@@ -1596,25 +867,27 @@ Role
 RoleBinding
 ```
 
-under:
+The manifests are maintained under:
 
 ```text
 kubernetes/platform/rbac/cd-runner/
 ```
 
-The restricted Role allows the deployment identity to:
+The Role grants only the deployment permissions required by CD.
 
-* get Deployments;
-* list Deployments;
-* watch Deployments;
-* patch the `havenbridge-api` Deployment.
+The identity can perform required Deployment operations but cannot read
+Kubernetes Secrets.
 
-The identity cannot read Kubernetes Secrets.
+---
 
 ## Least-Privilege Validation
 
-The positive authorization test was executed from
-`havenbridge-runner01` as the actual GitHub Actions Linux account:
+The HavenBridge CD identity was validated with both a positive and negative
+authorization test.
+
+### Positive Deployment Test
+
+**Host: `havenbridge-runner01`**
 
 ```bash
 sudo -u github-runner \
@@ -1623,16 +896,16 @@ sudo -u github-runner \
   -n havenbridge
 ```
 
-Result:
+Expected and validated behavior:
 
 ```text
 NAME              READY   UP-TO-DATE   AVAILABLE
 havenbridge-api   2/2     2            2
 ```
 
-The Deployment request was allowed.
+### Negative Secret Test
 
-A negative authorization test was then performed:
+**Host: `havenbridge-runner01`**
 
 ```bash
 sudo -u github-runner \
@@ -1641,68 +914,91 @@ sudo -u github-runner \
   -n havenbridge
 ```
 
-Result:
+Validated result:
 
 ```text
 Error from server (Forbidden)
 ```
 
-The request was intentionally denied.
+This proves that CD has the deployment permissions it needs without broad
+Secret access.
 
-I created a dedicated Kubernetes ServiceAccount for CD. A
-namespace-scoped Role grants only the deployment permissions it needs,
-and a RoleBinding connects the identity to those permissions. I then
-tested both positive and negative authorization cases to prove least
-privilege.
-
-Detailed RBAC validation evidence is stored at:
+Detailed evidence:
 
 ```text
 cicd/self-hosted-runner/evidence/kubernetes-rbac-validation.txt
 ```
 
-## Why CD Deploys the Commit-SHA Image
+A concise explanation is:
 
-The Release workflow publishes both a semantic-version image and an
-immutable commit-SHA image.
+> I created a dedicated Kubernetes ServiceAccount for CD. A namespace-scoped
+> Role grants only the deployment permissions it needs, and a RoleBinding
+> connects the identity to those permissions. I then tested both positive and
+> negative authorization cases to prove least privilege.
 
-For `v0.3.0`:
+---
+
+## Why CD Deploys the Semantic Release Tag
+
+Earlier HavenBridge CD releases deployed the commit-SHA-tagged container image
+directly.
+
+That approach provided excellent source traceability, but an operator looking
+at Kubernetes would see a value such as:
 
 ```text
-Human-readable release:
-
-ghcr.io/brunobrunt/havenbridge-api:v0.3.0
+ghcr.io/brunobrunt/havenbridge-api:aeab8e5f81f88689f1c0e00834492500367b5023
 ```
 
-and:
+rather than the application release version.
+
+The current CD implementation keeps SHA-based provenance validation but deploys
+the semantic release tag.
+
+For the validated `v0.8.0` release:
 
 ```text
-Exact source commit:
-
-ghcr.io/brunobrunt/havenbridge-api:e3bacb4f602b2adfb97356f2b75be8731c23d8c7
+RELEASE_TAG:
+v0.8.0
 ```
 
-Both images represent the same release source state.
-
-The CD workflow deploys the commit-SHA-tagged image because the SHA
-provides an exact connection between:
+Kubernetes now displays:
 
 ```text
-Git commit
-    ↓
-container image
-    ↓
+ghcr.io/brunobrunt/havenbridge-api:v0.8.0
+```
+
+while CRI-O records:
+
+```text
+ghcr.io/brunobrunt/havenbridge-api@sha256:9830854685b118be4bd9a8a1a2a0048eb5a6a3d32e2a9f8f72f21f8d82e6826c
+```
+
+The current relationship is:
+
+```text
+Git release commit
+        ↓
+RELEASE_SHA
+        ↓
+release provenance validation
+        ↓
+RELEASE_TAG
+        ↓
+ghcr.io/brunobrunt/havenbridge-api:v0.8.0
+        ↓
 Kubernetes Deployment
+        ↓
+CRI-O immutable image digest
 ```
 
-The semantic version remains the human-readable release identifier.
+This provides readable release identification without discarding traceability.
 
-A future enhancement may deploy by immutable container image digest for
-even stronger artifact-level immutability.
+---
 
 ## CD Workflow Environment
 
-The CD workflow defines the deployment target using:
+The CD deployment job uses:
 
 ```text
 KUBECONFIG=/home/github-runner/.kube/config
@@ -1710,355 +1006,133 @@ NAMESPACE=havenbridge
 DEPLOYMENT=havenbridge-api
 CONTAINER=havenbridge-api
 RELEASE_SHA=<release commit SHA>
+RELEASE_TAG=<semantic release tag>
 ```
 
-The release SHA is obtained from the completed Release workflow using:
+`RELEASE_SHA` identifies the exact source revision that produced the release.
 
-```yaml
-RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
-```
+`RELEASE_TAG` is the human-readable application release that CD deploys to
+Kubernetes.
 
-This ensures CD deploys the exact commit that produced the successful
-release.
+---
 
 ## CD Workflow Step-by-Step
 
-### Step 1 — Show Runner Identity
+### Step 1 — Verify the Release
+
+**Execution context: GitHub Actions / CD workflow**
+
+The workflow verifies the successful Release run and determines whether a
+semantic release was actually created.
+
+A successful no-op Release does not cause a Kubernetes deployment.
+
+### Step 2 — Validate the Release SHA
+
+**Execution context: GitHub Actions / CD workflow**
+
+`RELEASE_SHA` must be a valid 40-character hexadecimal Git SHA.
+
+Invalid values stop deployment.
+
+### Step 3 — Resolve the Semantic Release Tag
+
+**Execution context: GitHub Actions / CD workflow**
+
+The workflow finds the semantic version tag pointing at `RELEASE_SHA`.
+
+Example:
+
+```text
+RELEASE_SHA=<release commit>
+        ↓
+release tag lookup
+        ↓
+RELEASE_TAG=v0.8.0
+```
+
+The tag is then checked to ensure it resolves to the expected release commit.
+
+### Step 4 — Show Runner Identity
+
+**Execution context: `havenbridge-runner01` through GitHub Actions**
 
 The workflow displays:
 
 ```text
 Runner hostname
 Runner operating-system user
-Release commit SHA
+Release tag
+Release SHA
 ```
 
-This confirms that the deployment job is executing on the expected
-self-hosted runner.
+This confirms deployment is executing on the expected self-hosted runner with
+the expected release information.
 
-### Step 2 — Validate the Release SHA
+### Step 5 — Verify Kubernetes Access
 
-The workflow verifies that `RELEASE_SHA` is a valid 40-character
-hexadecimal Git SHA.
+**Execution context: `havenbridge-runner01` through GitHub Actions**
 
-Invalid values cause the deployment to stop.
-
-### Step 3 — Verify Kubernetes Access
-
-The runner executes:
+Equivalent command:
 
 ```bash
 kubectl get deployment havenbridge-api \
   -n havenbridge
 ```
 
-This proves that the runner can:
+This proves the runner can reach the Kubernetes API and authenticate using the
+restricted identity.
 
-* reach the Kubernetes API;
-* authenticate with the restricted kubeconfig;
-* access the HavenBridge Deployment.
+### Step 6 — Show the Currently Deployed Image
 
-### Step 4 — Show the Currently Deployed Image
+**Execution context: `havenbridge-runner01` through GitHub Actions**
 
-Before changing Kubernetes, the workflow reads the current container
-image from the Deployment.
+The workflow reads the existing Deployment image before modifying Kubernetes.
 
-Before the first automated CD rollout, HavenBridge used:
+This preserves a before-and-after deployment record in the Actions log.
 
-```text
-ghcr.io/brunobrunt/havenbridge-api:0.1.0
-```
+### Step 7 — Construct the Semantic Release Image
 
-This provides a clear before-and-after deployment record.
+**Execution context: `havenbridge-runner01` through GitHub Actions**
 
-### Step 5 — Construct the Release Image
-
-The workflow constructs:
-
-```text
-ghcr.io/brunobrunt/havenbridge-api:${RELEASE_SHA}
-```
-
-For `v0.3.0`, this became:
-
-```text
-ghcr.io/brunobrunt/havenbridge-api:e3bacb4f602b2adfb97356f2b75be8731c23d8c7
-```
-
-### Step 6 — Update the Kubernetes Deployment
-
-The equivalent deployment command is:
+Current logic:
 
 ```bash
-kubectl set image \
-  deployment/havenbridge-api \
-  havenbridge-api=ghcr.io/brunobrunt/havenbridge-api:<RELEASE_SHA> \
-  -n havenbridge
+IMAGE="ghcr.io/brunobrunt/havenbridge-api:${RELEASE_TAG}"
 ```
 
-Updating the Deployment Pod template causes Kubernetes to create a new
-rollout.
+For `v0.8.0`:
 
-### Step 7 — Wait for the Rollout
+```text
+ghcr.io/brunobrunt/havenbridge-api:v0.8.0
+```
 
-The workflow waits for Kubernetes using:
+The release SHA remains available separately for provenance validation.
+
+### Step 8 — Update the Kubernetes Deployment
+
+**Execution context: `havenbridge-runner01` through GitHub Actions**
+
+Equivalent operation:
 
 ```bash
-kubectl rollout status \
-  deployment/havenbridge-api \
-  -n havenbridge \
-  --timeout=180s
-```
-
-CD therefore does not report success merely because the Deployment was
-patched.
-
-The new workload must successfully roll out.
-
-### Step 8 — Verify the Deployed Image
-
-After rollout, the workflow reads the Deployment image again and
-compares it with the expected release SHA image.
-
-If the expected and actual values differ, the CD workflow fails.
-
-## CD Security Decisions
-
-The CD workflow intentionally uses:
-
-```yaml
-permissions: {}
-```
-
-because it does not require broad `GITHUB_TOKEN` permissions.
-
-Kubernetes authentication is provided locally on the self-hosted runner
-through the restricted kubeconfig.
-
-The workflow also intentionally does not check out the repository source
-code.
-
-The deployment job needs only:
-
-* the release SHA;
-* `kubectl`;
-* the restricted kubeconfig;
-* network access to the Kubernetes API.
-
-This reduces the amount of code executed on the trusted deployment
-runner.
-
-## Deployment Concurrency
-
-The workflow uses:
-
-```text
-havenbridge-production-deployment
-```
-
-as its concurrency group.
-
-It also uses:
-
-```yaml
-cancel-in-progress: false
-```
-
-This prevents multiple HavenBridge deployments from modifying the same
-Deployment simultaneously.
-
-## First Successful End-to-End CD Deployment
-
-The first successful self-hosted HavenBridge CD deployment used:
-
-```text
-Release: v0.3.0
-
-Commit:
-e3bacb4f602b2adfb97356f2b75be8731c23d8c7
-```
-
-The Release workflow completed successfully and published both the
-semantic-version image and commit-SHA image to GHCR.
-
-The following CD steps passed:
-
-```text
-Show CD runner identity        PASS
-Validate release SHA           PASS
-Verify Kubernetes access       PASS
-Show currently deployed image  PASS
-Deploy released API image      PASS
-Wait for rollout               PASS
-Verify deployed image          PASS
-```
-
-## Cluster-Side Image Validation
-
-After GitHub Actions completed, the deployment was independently checked
-from `havenbridge-runner01`:
-
-```bash
-sudo -u github-runner \
-  KUBECONFIG=/home/github-runner/.kube/config \
-  kubectl get deployment havenbridge-api \
-  -n havenbridge \
-  -o jsonpath='{.spec.template.spec.containers[?(@.name=="havenbridge-api")].image}{"\n"}'
-```
-
-Result:
-
-```text
-ghcr.io/brunobrunt/havenbridge-api:e3bacb4f602b2adfb97356f2b75be8731c23d8c7
-```
-
-This confirmed that Kubernetes was configured with the exact image
-produced from the `v0.3.0` release commit.
-
-## Kubernetes Rollout Validation
-
-The rollout was independently verified using:
-
-```bash
-sudo -u github-runner \
-  KUBECONFIG=/home/github-runner/.kube/config \
-  kubectl rollout status deployment/havenbridge-api \
-  -n havenbridge
-```
-
-Result:
-
-```text
-deployment "havenbridge-api" successfully rolled out
-```
-
-The first Release → GHCR → self-hosted CD runner → Kubernetes deployment
-therefore completed successfully end to end.
-
-## CD Deployment Evidence
-
-Detailed evidence for the first successful deployment is stored at:
-
-```text
-cicd/evidence/cd-deployment/v0.3.0-deployment-validation.txt
-```
-
-
-## Second Successful End-to-End CD Deployment: v0.4.0
-
-HavenBridge `v0.4.0` provided a second complete validation of the
-Release → GHCR → self-hosted CD → Kubernetes delivery path.
-
-Unlike `v0.3.0`, which primarily established and validated the CD
-infrastructure, `v0.4.0` contained a real application feature:
-
-```text
-PATCH /api/v1/inquiries/{inquiry_id}/status
-```
-
-The release used:
-
-```text
-Release:
-v0.4.0
-
-Commit:
-f4c146b97297455432ff37b9641e88806133ec0b
-
-Commit message:
-feat: add service inquiry status updates
-```
-
-Before the release tag was created, the normal HavenBridge CI workflow
-completed successfully for the application commit.
-
-The CI workflow validated:
-
-```text
-Detect HavenBridge API changes        PASS
-Run HavenBridge API tests             PASS
-Build HavenBridge API Docker image    PASS
-Validate Kubernetes manifests         PASS
-Log in to GHCR                        PASS
-Tag image for GHCR                    PASS
-Push image to GHCR                    PASS
-```
-
-The annotated Git tag:
-
-```text
-v0.4.0
-```
-
-then triggered the `HavenBridge Release` workflow.
-
-After the Release workflow completed successfully, the
-`HavenBridge CD` workflow started automatically.
-
-The release-to-CD relationship is:
-
-```text
-v0.4.0 Git tag
-        ↓
-HavenBridge Release
-        ↓
-Release succeeds
-        ↓
-HavenBridge CD
-        ↓
-Self-hosted runner
-        ↓
-Kubernetes
-```
-
-CD is not triggered independently by the tag. It waits for the Release
-workflow to complete successfully.
-
-### How the CD Workflow Changes the Kubernetes Image
-
-The image change is performed by this operation in `.github/workflows/cd.yml`:
-
-```bash
-IMAGE="ghcr.io/brunobrunt/havenbridge-api:${RELEASE_SHA}"
-
 kubectl set image \
   deployment/"${DEPLOYMENT}" \
   "${CONTAINER}"="${IMAGE}" \
   -n "${NAMESPACE}"
 ```
 
-For `v0.4.0`, the release SHA was:
+With `v0.8.0`, the effective image is:
 
 ```text
-f4c146b97297455432ff37b9641e88806133ec0b
+ghcr.io/brunobrunt/havenbridge-api:v0.8.0
 ```
 
-Therefore the image deployed by CD was:
+Changing the Pod template causes Kubernetes to create a new rollout.
 
-```text
-ghcr.io/brunobrunt/havenbridge-api:f4c146b97297455432ff37b9641e88806133ec0b
-```
+### Step 9 — Wait for the Rollout
 
-`kubectl set image` is the command that changes the Deployment Pod
-template.
-
-Conceptually:
-
-```text
-kubectl set image
-        ↓
-Deployment Pod template changes
-        ↓
-Kubernetes detects the new template
-        ↓
-New ReplicaSet is created
-        ↓
-New Pods start with the new image
-        ↓
-Old Pods are replaced
-```
-
-The next CD command:
+**Execution context: `havenbridge-runner01` through GitHub Actions**
 
 ```bash
 kubectl rollout status \
@@ -2067,242 +1141,143 @@ kubectl rollout status \
   --timeout=180s
 ```
 
-does not change the image. It waits for Kubernetes to complete the new
-rollout successfully.
+CD does not report deployment success merely because the Deployment was
+patched. The workload must roll out successfully.
 
-A later command such as:
+### Step 10 — Verify the Deployed Image
+
+**Execution context: `havenbridge-runner01` through GitHub Actions**
+
+Current expected-image logic:
 
 ```bash
-kubectl get deployment havenbridge-api \
-  -n havenbridge \
-  -o jsonpath='{.spec.template.spec.containers[?(@.name=="havenbridge-api")].image}{"\n"}'
+EXPECTED="ghcr.io/brunobrunt/havenbridge-api:${RELEASE_TAG}"
 ```
 
-also does not change the image.
+The workflow reads the image currently configured on the Deployment and
+compares it with `EXPECTED`.
 
-It only reads the Deployment and shows which image is currently
-configured.
-
-The distinction is:
+For `v0.8.0`:
 
 ```text
-kubectl set image       = CHANGE the Deployment image
-kubectl rollout status  = WAIT for / VERIFY the rollout
-kubectl get             = READ / VERIFY the configured image
+Expected:
+ghcr.io/brunobrunt/havenbridge-api:v0.8.0
+
+Actual:
+ghcr.io/brunobrunt/havenbridge-api:v0.8.0
 ```
 
-### Cluster-Side v0.4.0 Image Validation
+If the values differ, the CD workflow fails.
 
-The deployed image was independently checked from the Kubernetes
-environment.
+---
 
-Command:
+## CD Security Decisions
 
-```bash
-kubectl get deployment havenbridge-api \
-  -n havenbridge \
-  -o jsonpath='{.spec.template.spec.containers[?(@.name=="havenbridge-api")].image}{"\n"}'
+The CD workflow intentionally minimizes access.
+
+Key decisions include:
+
+- Deployment occurs only through the dedicated self-hosted runner.
+- The runner uses a dedicated Linux account.
+- Kubernetes authentication uses a dedicated ServiceAccount.
+- RBAC is namespace-scoped.
+- Secret listing is intentionally denied.
+- The CD workflow does not require Kubernetes administrator credentials.
+- Release provenance is verified before deployment.
+- No-op releases do not redeploy the application.
+- Deployment concurrency prevents overlapping production-style rollouts.
+
+The CD job needs:
+
+```text
+RELEASE_SHA
+RELEASE_TAG
+kubectl
+restricted kubeconfig
+network access to Kubernetes API
 ```
 
-Result:
+---
+
+## Deployment Concurrency
+
+The CD workflow uses the deployment concurrency group:
+
+```text
+havenbridge-production-deployment
+```
+
+and:
+
+```yaml
+cancel-in-progress: false
+```
+
+This prevents separate HavenBridge CD runs from modifying the same Deployment
+simultaneously.
+
+---
+
+## Historical Release Validation
+
+The release history below is intentionally retained because it documents the
+evolution of the HavenBridge pipeline.
+
+### v0.3.0 — First Successful Self-Hosted CD Deployment
+
+`v0.3.0` was the first successful end-to-end self-hosted CD deployment.
+
+Release:
+
+```text
+v0.3.0
+```
+
+Commit:
+
+```text
+e3bacb4f602b2adfb97356f2b75be8731c23d8c7
+```
+
+At this stage, CD deployed the commit-SHA-tagged image directly.
+
+Validated flow:
+
+```text
+HavenBridge Release
+        ↓
+GHCR
+        ↓
+Self-hosted CD runner
+        ↓
+Kubernetes Deployment
+        ↓
+successful rollout
+```
+
+Evidence:
+
+```text
+cicd/evidence/cd-deployment/v0.3.0-deployment-validation.txt
+```
+
+### v0.4.0 — Feature, Gateway and PostgreSQL Persistence Validation
+
+For `v0.4.0`, CD still used the commit SHA as the Kubernetes image tag.
+
+Release SHA:
+
+```text
+f4c146b97297455432ff37b9641e88806133ec0b
+```
+
+Historical deployed image:
 
 ```text
 ghcr.io/brunobrunt/havenbridge-api:f4c146b97297455432ff37b9641e88806133ec0b
 ```
 
-This proved that Kubernetes was configured with the exact image produced
-from the `v0.4.0` release commit.
-
-### Kubernetes Rollout Validation for v0.4.0
-
-Command:
-
-```bash
-kubectl rollout status \
-  deployment/havenbridge-api \
-  -n havenbridge \
-  --timeout=180s
-```
-
-Result:
-
-```text
-deployment "havenbridge-api" successfully rolled out
-```
-
-Two HavenBridge API Pods were confirmed running:
-
-```text
-havenbridge-api-5c8bf7fcd7-c8ggj   1/1   Running   eph-worker01
-havenbridge-api-5c8bf7fcd7-wt5xc   1/1   Running   eph-worker02
-```
-
-This also confirmed that the API replicas were distributed across the
-two worker nodes.
-
-### Gateway Validation for v0.4.0
-
-From `syrus`, the API was reachable using:
-
-```bash
-curl -k -i https://havenbridge.lab/
-```
-
-Result:
-
-```text
-HTTP/2 200
-```
-
-On `eph-cp01`, `havenbridge.lab` did not resolve locally.
-
-The application Gateway path was therefore tested without changing DNS
-by using:
-
-```bash
-curl -k -i \
-  --resolve havenbridge.lab:443:172.16.10.40 \
-  https://havenbridge.lab/
-```
-
-Result:
-
-```text
-HTTP/2 200
-```
-
-This validated the application path through:
-
-```text
-eph-cp01
-    ↓
-172.16.10.40
-    ↓
-Traefik / Gateway API
-    ↓
-HTTPRoute
-    ↓
-havenbridge-api Service
-    ↓
-HavenBridge API Pods
-```
-
-The missing `havenbridge.lab` name resolution on `eph-cp01` is a
-separate lab DNS/hosts follow-up and did not prevent application
-validation.
-
-### Deployed PATCH Feature Validation
-
-The new `v0.4.0` status-update endpoint was tested against the
-Kubernetes-deployed application:
-
-```bash
-curl -k -i \
-  --resolve havenbridge.lab:443:172.16.10.40 \
-  -X PATCH \
-  https://havenbridge.lab/api/v1/inquiries/1/status \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "status": "closed"
-  }'
-```
-
-Result:
-
-```text
-HTTP/2 200
-```
-
-The API response confirmed:
-
-```text
-id:
-1
-
-requester_name:
-Version 0.4 Test
-
-status:
-closed
-
-updated_at:
-2026-08-21T16:14:48.550344Z
-```
-
-### PostgreSQL Persistence Validation
-
-The persisted value was then verified independently inside PostgreSQL.
-
-PostgreSQL access:
-
-```bash
-kubectl exec -it \
-  -n havenbridge \
-  havenbridge-postgres-0 \
-  -c postgresql \
-  -- psql \
-  -U havenbridge_admin \
-  -d havenbridge
-```
-
-Query:
-
-```sql
-SELECT
-    id,
-    requester_name,
-    status,
-    created_at,
-    updated_at
-FROM service_inquiries
-WHERE id = 1;
-```
-
-Result:
-
-```text
-id             = 1
-requester_name = Version 0.4 Test
-status         = closed
-updated_at     = 2026-08-21 16:14:48.550344+00
-```
-
-This proved that the new status was not only returned by the API but was
-also committed successfully to PostgreSQL.
-
-### v0.4.0 End-to-End Result
-
-The complete validated path was:
-
-```text
-Application feature
-        ↓
-Commit f4c146b...
-        ↓
-Normal CI
-        ↓
-Annotated tag v0.4.0
-        ↓
-HavenBridge Release
-        ↓
-GHCR
-        ↓
-HavenBridge CD
-        ↓
-havenbridge-runner01
-        ↓
-kubectl set image
-        ↓
-Kubernetes rollout
-        ↓
-Gateway validation
-        ↓
-PATCH feature validation
-        ↓
-PostgreSQL persistence validation
-```
-
-Validation summary:
+Validation included:
 
 ```text
 CI application tests                    PASS
@@ -2315,318 +1290,58 @@ Self-hosted CD deployment               PASS
 Exact SHA image verification            PASS
 Kubernetes rollout                      PASS
 Two API Pods running                    PASS
-Gateway HTTP/2 access                   PASS
+Gateway validation                      PASS
 Deployed PATCH endpoint                 PASS
 PostgreSQL persistence verification     PASS
 ```
 
-Final result:
+The deployed status-update endpoint was validated through the HavenBridge
+Gateway and the resulting PostgreSQL state was independently verified.
 
-```text
-PASS
-```
-
-Detailed evidence is stored at:
+Evidence:
 
 ```text
 cicd/evidence/cd-deployment/v0.4.0-deployment-validation.txt
 ```
 
-Two non-blocking follow-up items were identified during this validation:
+### v0.5.0 — Application Version Reporting
 
-1. `eph-cp01` does not currently resolve `havenbridge.lab`; the Gateway
-   remained reachable when the host-to-IP mapping was supplied with
-   `curl --resolve`.
+`v0.5.0` validated application-version injection and runtime reporting.
 
-2. The API root response currently reports `"version":"0.1.0"` even
-   though the deployed release is `v0.4.0`. Application version reporting
-   should later be aligned with the actual deployed release.
-
-
-## CD Troubleshooting
-
-### CD Workflow Does Not Start
-
-Confirm that `HavenBridge Release` completed successfully.
-
-The CD workflow is triggered by Release completion and not directly by a
-normal push to `main`.
-
-### Self-Hosted Runner Is Offline
-
-On `havenbridge-runner01`:
-
-```bash
-sudo systemctl status \
-  actions.runner.brunobrunt-havenbridge-ha-service-platform.havenbridge-runner01.service
-```
-
-Confirm automatic startup:
-
-```bash
-sudo systemctl is-enabled \
-  actions.runner.brunobrunt-havenbridge-ha-service-platform.havenbridge-runner01.service
-```
-
-Confirm that it is currently running:
-
-```bash
-sudo systemctl is-active \
-  actions.runner.brunobrunt-havenbridge-ha-service-platform.havenbridge-runner01.service
-```
-
-### Kubernetes Access Fails
-
-Test using the exact identity used by GitHub Actions:
-
-```bash
-sudo -u github-runner \
-  KUBECONFIG=/home/github-runner/.kube/config \
-  kubectl get deployment havenbridge-api \
-  -n havenbridge
-```
-
-### Kubernetes Returns Forbidden
-
-Do not solve a `Forbidden` error by giving the runner cluster-admin
-privileges.
-
-Review:
+The running API successfully reported:
 
 ```text
-kubernetes/platform/rbac/cd-runner/role.yaml
+version: 0.5.0
 ```
 
-and add only the minimum permission genuinely required by CD.
-
-### Rollout Fails or Times Out
-
-Check the Deployment:
-
-```bash
-kubectl get deployment havenbridge-api \
-  -n havenbridge
-```
-
-Check the Pods:
-
-```bash
-kubectl get pods \
-  -n havenbridge
-```
-
-Describe the Deployment:
-
-```bash
-kubectl describe deployment havenbridge-api \
-  -n havenbridge
-```
-
-Review recent Kubernetes events:
-
-```bash
-kubectl get events \
-  -n havenbridge \
-  --sort-by='.lastTimestamp'
-```
-
-## Current Release and Deployment Model
-
-The current HavenBridge release model keeps a deliberate human approval gate
-while automating semantic-version selection and Git-tag creation.
+Evidence:
 
 ```text
-Develop
-    ↓
-Conventional Commit
-    ↓
-Push to main
-    ↓
-HavenBridge CI
-    ↓
-CI succeeds
-    ↓
-Human approves release
-by running HavenBridge Release
-    ↓
-next-version.sh examines committed API changes
-    ↓
-Semantic version calculated automatically
-    ↓
-Release tests and validation
-    ↓
-Release image published to GHCR
-    ↓
-Annotated Git tag created automatically
-    ↓
-Git tag pushed automatically
-    ↓
-Release workflow succeeds
-    ↓
-HavenBridge CD
-    ↓
-Self-hosted runner
-    ↓
-Kubernetes
+cicd/evidence/cd-deployment/v0.5.0-version-reporting-validation.txt
 ```
 
-The human release decision remains intentional.
+### v0.6.0 — Automated Semantic Release Validation
 
-The following manual work is no longer required:
+`v0.6.0` validated automatic semantic-version calculation and automatic Git
+tag creation.
+
+The release was calculated from a conventional application commit using:
 
 ```text
-Manually calculate v0.x.x
-Manually run git tag -a
-Manually run git push origin <tag>
+feat:
 ```
 
-Release automation now performs those operations.
+which correctly produced a MINOR release.
 
-The first complete GitHub Actions end-to-end validation of this automated
-release model is still pending.
-
-## Automated Semantic Versioning Implementation Status
-
-HavenBridge has now implemented automated semantic-version calculation and
-automatic Git-tag creation.
-
-The earlier manual process was:
-
-```text
-Human selects release version
-        ↓
-Human creates annotated Git tag
-        ↓
-Human pushes Git tag
-        ↓
-Release workflow
-        ↓
-CD deployment
-```
-
-The new implementation is:
-
-```text
-Conventional application commit
-        ↓
-HavenBridge CI
-        ↓
-Human starts HavenBridge Release
-        ↓
-next-version.sh examines committed API changes
-        ↓
-Release type determined automatically
-        ↓
-Semantic version calculated automatically
-        ↓
-Release image built and validated
-        ↓
-Semantic-version image pushed to GHCR
-        ↓
-Annotated Git tag created automatically
-        ↓
-Git tag pushed automatically
-        ↓
-Existing CD workflow deploys the release
-```
-
-The current release rules are:
-
-```text
-feat:   → MINOR
-fix:    → PATCH
-feat!:  → MAJOR
-```
-
-For example:
-
-```text
-v0.5.0
-    +
-feat: add referral workflow
-    ↓
-v0.6.0
-```
-
-The version-calculation logic is maintained in:
-
-```text
-cicd/scripts/next-version.sh
-```
-
-The GitHub Actions orchestration is maintained in:
-
-```text
-.github/workflows/release.yml
-```
-
-The human release gate is intentionally retained for now.
-
-This means HavenBridge currently automates:
-
-```text
-Version calculation
-Git tag creation
-Git tag push
-Container-image tagging
-Container-image publication
-Release-to-CD handoff
-```
-
-while a human still decides when the Release workflow should run.
-
-A later enhancement may remove the manual `workflow_dispatch` approval point
-and allow eligible commits to initiate releases automatically after suitable
-branch, pull-request, and release controls are established.
-
-The automated semantic-version implementation has now completed its first full
-GitHub Actions end-to-end validation.
-
-The validated release was:
-
-```text
-v0.6.0
-```
-
-It was produced from the application commit:
-
-```text
-9df2c05d4c18ccb97ebb8ee0b039fcad16e90ad6
-
-feat: add service inquiry lookup endpoint
-```
-
-The Release workflow automatically determined:
+Validated release:
 
 ```text
 Latest release: v0.5.0
-Release type:  minor
-Next release:  v0.6.0
+Release type:   minor
+Next release:   v0.6.0
 ```
 
-GitHub Actions then successfully:
-
-```text
-Calculated v0.6.0 automatically
-        ↓
-Built the release image with APP_VERSION=0.6.0
-        ↓
-Published the release image to GHCR
-        ↓
-Created annotated Git tag v0.6.0
-        ↓
-Pushed v0.6.0 automatically
-        ↓
-Completed HavenBridge Release
-        ↓
-Triggered HavenBridge CD
-        ↓
-Deployed the exact commit SHA to Kubernetes
-        ↓
-Running application reported version 0.6.0
-```
-
-The automatically created Git tag was verified as:
+Automatically created tag:
 
 ```text
 Tag:     v0.6.0
@@ -2634,203 +1349,142 @@ Tagger:  github-actions[bot]
 Commit:  9df2c05d4c18ccb97ebb8ee0b039fcad16e90ad6
 ```
 
-The Kubernetes Deployment was verified to use:
+At this historical stage, Kubernetes still deployed the exact commit SHA:
 
 ```text
 ghcr.io/brunobrunt/havenbridge-api:9df2c05d4c18ccb97ebb8ee0b039fcad16e90ad6
 ```
 
-The running HavenBridge API reported:
+That historical behavior is intentionally documented rather than rewritten.
 
-```text
-"version": "0.6.0"
-```
-
-The released feature was also validated successfully through:
-
-```text
-GET /api/v1/inquiries/{inquiry_id}
-```
-
-The complete evidence is stored at:
+Evidence:
 
 ```text
 cicd/evidence/cd-deployment/v0.6.0-automated-semantic-release-validation.txt
 ```
 
-The automated semantic-version release implementation is therefore:
+### v0.8.0 — Semantic Tag Kubernetes Deployment
 
-```text
-IMPLEMENTED    PASS
-VALIDATED      PASS
-RELEASE → CD   PASS
-KUBERNETES     PASS
+`v0.8.0` validated the current deployment model.
+
+The CD workflow changed from:
+
+```bash
+IMAGE="ghcr.io/brunobrunt/havenbridge-api:${RELEASE_SHA}"
 ```
 
+to:
 
-## Related CI/CD Documentation
-
-GitHub-hosted runners:
-
-```text
-cicd/github-hosted-runners/README.md
+```bash
+IMAGE="ghcr.io/brunobrunt/havenbridge-api:${RELEASE_TAG}"
 ```
 
-Self-hosted runner:
+Deployment verification changed from:
 
-```text
-cicd/self-hosted-runner/README.md
+```bash
+EXPECTED="ghcr.io/brunobrunt/havenbridge-api:${RELEASE_SHA}"
 ```
 
-Self-hosted runner RBAC evidence:
+to:
 
-```text
-cicd/self-hosted-runner/evidence/kubernetes-rbac-validation.txt
+```bash
+EXPECTED="ghcr.io/brunobrunt/havenbridge-api:${RELEASE_TAG}"
 ```
 
-CD deployment evidence:
+The SHA remains part of release verification and provenance.
 
-```text
-cicd/evidence/cd-deployment/v0.3.0-deployment-validation.txt
-cicd/evidence/cd-deployment/v0.4.0-deployment-validation.txt
-cicd/evidence/cd-deployment/v0.5.0-version-reporting-validation.txt
-cicd/evidence/cd-deployment/v0.6.0-automated-semantic-release-validation.txt
+The semantic tag now becomes the visible Kubernetes Deployment image.
+
+---
+
+## v0.8.0 Kubernetes Validation
+
+### Rollout
+
+**Host: `eph-cp01`**
+
+```bash
+kubectl -n havenbridge rollout status deployment/havenbridge-api
 ```
 
-GitHub Actions workflows:
+Validated result:
 
 ```text
-.github/workflows/ci.yml
-.github/workflows/release.yml
-.github/workflows/cd.yml
+deployment "havenbridge-api" successfully rolled out
 ```
 
-Semantic-version calculator:
+### Deployment Availability
+
+**Host: `eph-cp01`**
+
+```bash
+kubectl -n havenbridge get deployment havenbridge-api
+```
+
+Validated result:
 
 ```text
-cicd/scripts/next-version.sh
+NAME              READY   UP-TO-DATE   AVAILABLE   AGE
+havenbridge-api   2/2     2            2           44d
 ```
 
-The semantic-version calculator examines committed HavenBridge API changes
-after the latest release tag and determines the next release version using
-the current HavenBridge release rules:
+### API Pods
+
+**Host: `eph-cp01`**
+
+```bash
+kubectl -n havenbridge get pods | grep havenbridge-api
+```
+
+Validated result:
 
 ```text
-feat:   → MINOR
-fix:    → PATCH
-feat!:  → MAJOR
+havenbridge-api-b99c859b7-kgn7k   1/1   Running   0   63m
+havenbridge-api-b99c859b7-vwj9s   1/1   Running   0   63m
 ```
 
-The calculated values are passed back to:
+### Semantic Tag and Runtime Digest
+
+**Host: `eph-cp01`**
+
+```bash
+POD=$(kubectl -n havenbridge get pods -o name \
+  | grep '^pod/havenbridge-api-' \
+  | head -n1)
+
+kubectl -n havenbridge get "${POD}" \
+  -o jsonpath='Image: {.spec.containers[?(@.name=="havenbridge-api")].image}{"\n"}ImageID: {.status.containerStatuses[?(@.name=="havenbridge-api")].imageID}{"\n"}'
+```
+
+Validated result:
 
 ```text
-.github/workflows/release.yml
+Image: ghcr.io/brunobrunt/havenbridge-api:v0.8.0
+ImageID: ghcr.io/brunobrunt/havenbridge-api@sha256:9830854685b118be4bd9a8a1a2a0048eb5a6a3d32e2a9f8f72f21f8d82e6826c
 ```
 
-through GitHub Actions `GITHUB_OUTPUT`.
-
-
-## Current CD Status
-
-The HavenBridge Release + self-hosted continuous deployment implementation is
-complete and validated.
-
-The release and CD architecture has successfully deployed multiple
-semantic-version releases through the self-hosted runner into the Kubernetes
-cluster.
-
-Completed milestones include:
-
-* GitHub-hosted CI validated.
-* GHCR publication validated.
-* Original manual Git-tag Release workflow validated.
-* Dedicated self-hosted CD runner provisioned.
-* GitHub Actions runner registered.
-* Runner systemd service enabled and running.
-* Dedicated `github-runner` Linux account configured.
-* Restricted Kubernetes kubeconfig installed.
-* Dedicated `havenbridge-deployer` ServiceAccount configured.
-* Namespace-scoped Role and RoleBinding configured.
-* Positive Deployment authorization test passed.
-* Negative Secret authorization test passed.
-* Release-to-CD workflow chaining validated.
-* Commit-SHA image deployment validated.
-* Kubernetes rollout validation passed.
-* Exact deployed-image verification passed.
-* Release `v0.3.0` successfully deployed.
-* Release `v0.4.0` successfully deployed.
-* `PATCH /api/v1/inquiries/{inquiry_id}/status` validated through the Gateway.
-* PostgreSQL persistence of the deployed `v0.4.0` status update independently verified.
-* Release `v0.5.0` successfully deployed.
-* Automatic application-version injection validated with the running API reporting `"version": "0.5.0"`.
-* Release `v0.6.0` successfully calculated, created, published, and deployed automatically.
-* Automatic Git tag `v0.6.0` created by `github-actions[bot]`.
-* Running Kubernetes application validated reporting `"version": "0.6.0"`.
-* `GET /api/v1/inquiries/{inquiry_id}` successfully validated through the HavenBridge Gateway.
-
-### Semantic-Version Automation Status
-
-HavenBridge automated semantic-version calculation and automatic Git-tag
-creation are now implemented and validated end-to-end.
-
-Current validation status:
+Validation conclusion:
 
 ```text
-Semantic-version calculator              PASS
-API-specific Git-history filtering        PASS
-Conventional-commit release rules         PASS
-No-release negative guard                 PASS
-Automatic version calculation             PASS
-Automatic MINOR release calculation       PASS
-Automatic Git-tag creation                PASS
-Automatic Git-tag push                    PASS
-GHCR semantic-version publication         PASS
-Human workflow_dispatch release gate      RETAINED INTENTIONALLY
-Release-to-CD workflow chaining           PASS
-Self-hosted CD deployment                 PASS
-Exact commit-SHA Kubernetes deployment    PASS
-Running application version reporting     PASS
-Released API feature validation           PASS
+Semantic release-tag deployment            PASS
+Kubernetes rollout                          PASS
+Deployment replicas 2/2                    PASS
+Two HavenBridge API Pods Running           PASS
+Human-readable Kubernetes image version    PASS
+Immutable runtime image digest             PASS
 ```
 
-The negative release-path test also proved that CI/CD-only changes do not
-create a new HavenBridge API release.
-
-When no release-causing application commit exists:
+Evidence:
 
 ```text
-HavenBridge Release
-        ↓
-next-version.sh
-        ↓
-No release-causing commit found
-        ↓
-Release stops
-        ↓
-No semantic Git tag
-        ↓
-No application deployment
+cicd/evidence/cd-deployment/v0.8.0-semantic-tag-deployment-validation.txt
 ```
 
-The first successful automated semantic release was:
+---
 
-```text
-v0.6.0
-```
+## Current Release and Deployment Model
 
-The release was produced from a conventional application commit using:
-
-```text
-feat:
-```
-
-which the HavenBridge release policy correctly interpreted as:
-
-```text
-MINOR
-```
-
-The validated release flow is now:
+The current model is:
 
 ```text
 Application development
@@ -2841,73 +1495,431 @@ Push to main
         ↓
 HavenBridge CI
         ↓
-Human starts HavenBridge Release
+Tests / build / manifest validation
+        ↓
+HavenBridge Release
         ↓
 next-version.sh
         ↓
-Semantic version calculated automatically
-        ↓
-Application tests
-        ↓
-Release Docker build
-        ↓
-Kubernetes manifest validation
-        ↓
-GHCR publication
-        ↓
-Annotated Git tag created automatically
-        ↓
-Git tag pushed automatically
-        ↓
-HavenBridge Release succeeds
-        ↓
-HavenBridge CD
-        ↓
-Self-hosted runner
-        ↓
-Restricted Kubernetes deployer identity
-        ↓
-Exact commit-SHA deployment
-        ↓
-Kubernetes rollout
-        ↓
-Running HavenBridge application
+Does the API change require a release?
+        │
+        ├── NO
+        │    ↓
+        │  successful no-op
+        │    ↓
+        │  no semantic tag
+        │    ↓
+        │  no Kubernetes deployment
+        │
+        └── YES
+             ↓
+        semantic version calculated
+             ↓
+        release image built
+             ↓
+        semantic tag published to GHCR
+             +
+        commit-SHA tag published to GHCR
+             ↓
+        annotated Git tag created
+             ↓
+        HavenBridge Release succeeds
+             ↓
+        HavenBridge CD
+             ↓
+        verify RELEASE_SHA provenance
+             ↓
+        resolve RELEASE_TAG
+             ↓
+        self-hosted runner
+             ↓
+        restricted Kubernetes deployer identity
+             ↓
+        semantic-version image deployment
+             ↓
+        Kubernetes rollout
+             ↓
+        Deployment image verification
+             ↓
+        CRI-O immutable digest
+             ↓
+        running HavenBridge application
 ```
 
-The manual commands previously required for release creation are no longer
-part of the normal HavenBridge release process:
+---
+
+## Rollback Model
+
+Explicit semantic versions make rollback easier to understand.
+
+Example:
 
 ```text
-git tag -a v0.x.x ...
-git push origin v0.x.x
+v0.8.1 deployed
+        ↓
+problem detected
+        ↓
+identify previous known-good release
+        ↓
+v0.8.0
+        ↓
+redeploy approved image
+        ↓
+verify rollout
+        ↓
+validate application health
 ```
 
-The human release approval point is intentionally retained through:
+A future automated rollback mechanism can build on the same versioning model.
 
-```yaml
-workflow_dispatch:
+Database schema changes must be considered independently because an application
+rollback can be unsafe if the database schema has become incompatible.
+
+---
+
+## Troubleshooting
+
+### CD Workflow Does Not Start
+
+Confirm that `HavenBridge Release` completed and that the CD
+`workflow_run` trigger is configured for the correct workflow name.
+
+Also confirm that a real semantic application release was created.
+
+A successful no-op Release is expected to produce no deployment.
+
+### Self-Hosted Runner Is Offline
+
+**Host: `havenbridge-runner01`**
+
+```bash
+sudo systemctl status \
+  actions.runner.brunobrunt-havenbridge-ha-service-platform.havenbridge-runner01.service
 ```
 
-This means a human still decides **when** HavenBridge should release, while the
-release automation determines **what version** should be created.
+**Host: `havenbridge-runner01`**
 
-Validation evidence is stored in:
+```bash
+sudo systemctl is-enabled \
+  actions.runner.brunobrunt-havenbridge-ha-service-platform.havenbridge-runner01.service
+```
+
+**Host: `havenbridge-runner01`**
+
+```bash
+sudo systemctl is-active \
+  actions.runner.brunobrunt-havenbridge-ha-service-platform.havenbridge-runner01.service
+```
+
+### Kubernetes Access Fails
+
+**Host: `havenbridge-runner01`**
+
+```bash
+sudo -u github-runner \
+  KUBECONFIG=/home/github-runner/.kube/config \
+  kubectl get deployment havenbridge-api \
+  -n havenbridge
+```
+
+### Kubernetes Returns Forbidden
+
+Do not solve a `Forbidden` error by granting cluster-admin.
+
+Review the Role:
+
+```text
+kubernetes/platform/rbac/cd-runner/role.yaml
+```
+
+and add only the minimum permission genuinely required by the deployment
+workflow.
+
+### Rollout Fails or Times Out
+
+**Host: `eph-cp01`**
+
+```bash
+kubectl get deployment havenbridge-api \
+  -n havenbridge
+```
+
+**Host: `eph-cp01`**
+
+```bash
+kubectl get pods \
+  -n havenbridge
+```
+
+**Host: `eph-cp01`**
+
+```bash
+kubectl describe deployment havenbridge-api \
+  -n havenbridge
+```
+
+**Host: `eph-cp01`**
+
+```bash
+kubectl get events \
+  -n havenbridge \
+  --sort-by='.lastTimestamp'
+```
+
+### Verify the Current Release Tag
+
+**Host: `eph-cp01`**
+
+```bash
+kubectl -n havenbridge get deployment havenbridge-api \
+  -o jsonpath='{.spec.template.spec.containers[?(@.name=="havenbridge-api")].image}{"\n"}'
+```
+
+Expected pattern:
+
+```text
+ghcr.io/brunobrunt/havenbridge-api:vX.Y.Z
+```
+
+### Verify Runtime Digest
+
+**Host: `eph-cp01`**
+
+```bash
+POD=$(kubectl -n havenbridge get pods -o name \
+  | grep '^pod/havenbridge-api-' \
+  | head -n1)
+
+kubectl -n havenbridge get "${POD}" \
+  -o jsonpath='Image: {.spec.containers[?(@.name=="havenbridge-api")].image}{"\n"}ImageID: {.status.containerStatuses[?(@.name=="havenbridge-api")].imageID}{"\n"}'
+```
+
+---
+
+## Evidence Index
+
+### CI Foundation
+
+```text
+cicd/evidence/ci-foundation/github-actions-ci-validation-results.txt
+cicd/evidence/ci-foundation/github-actions-ci-validation-steps.txt
+```
+
+### Docker Build
+
+```text
+cicd/evidence/docker-build/github-actions-docker-build-validation-results.txt
+cicd/evidence/docker-build/github-actions-docker-build-validation-steps.txt
+```
+
+### Kubernetes Manifest Validation
+
+```text
+cicd/evidence/k8s-manifest-validation/gha-k8s-manifest-validation-results.txt
+cicd/evidence/k8s-manifest-validation/gha-k8s-manifest-validation-steps.txt
+```
+
+### GHCR Publication
+
+```text
+cicd/evidence/ghcr-publication/gha-ghcr-publication-results.txt
+cicd/evidence/ghcr-publication/gha-ghcr-publication-steps.txt
+```
+
+### GHCR Change Detection
+
+```text
+cicd/evidence/ghcr-change-detection/gha-ghcr-change-detection-results.txt
+cicd/evidence/ghcr-change-detection/gha-ghcr-change-detection-steps.txt
+```
+
+### Semantic Release
+
+```text
+cicd/evidence/semver-release/gha-semver-release-results.txt
+cicd/evidence/semver-release/gha-semver-release-steps.txt
+```
+
+### CD Deployments
 
 ```text
 cicd/evidence/cd-deployment/v0.3.0-deployment-validation.txt
 cicd/evidence/cd-deployment/v0.4.0-deployment-validation.txt
 cicd/evidence/cd-deployment/v0.5.0-version-reporting-validation.txt
 cicd/evidence/cd-deployment/v0.6.0-automated-semantic-release-validation.txt
+cicd/evidence/cd-deployment/v0.8.0-semantic-tag-deployment-validation.txt
 ```
 
-The automated semantic-version release phase is therefore considered:
+### Self-Hosted Runner and RBAC
 
 ```text
-IMPLEMENTED       PASS
-NEGATIVE PATH     PASS
-POSITIVE PATH     PASS
-RELEASE           PASS
-CD                PASS
-KUBERNETES        PASS
-APPLICATION       PASS
+cicd/self-hosted-runner/evidence/kubernetes-rbac-validation.txt
+cicd/self-hosted-runner/evidence/automated-release-no-release-validation.txt
 ```
+
+---
+
+## Related CI/CD Documentation
+
+GitHub-hosted runner documentation:
+
+```text
+cicd/github-hosted-runners/README.md
+```
+
+Self-hosted runner documentation:
+
+```text
+cicd/self-hosted-runner/README.md
+```
+
+Semantic-version calculator:
+
+```text
+cicd/scripts/next-version.sh
+```
+
+GitHub Actions workflows:
+
+```text
+.github/workflows/ci.yml
+.github/workflows/release.yml
+.github/workflows/cd.yml
+```
+
+Kubernetes CD RBAC:
+
+```text
+kubernetes/platform/rbac/cd-runner/
+```
+
+---
+
+## Current CI/CD Status
+
+The HavenBridge CI/CD implementation has been validated across CI, release
+automation, GHCR publication, restricted self-hosted deployment and Kubernetes
+runtime verification.
+
+Current status:
+
+```text
+GitHub-hosted CI                           PASS
+FastAPI automated tests                   PASS
+Docker build validation                   PASS
+Kubernetes manifest validation            PASS
+GHCR publication                          PASS
+Semantic-version calculator               PASS
+API-specific release filtering            PASS
+Conventional-commit release rules         PASS
+No-release negative guard                 PASS
+Automatic version calculation             PASS
+Automatic Git-tag creation                PASS
+Automatic Git-tag push                    PASS
+Release-to-CD workflow chaining           PASS
+Dedicated self-hosted CD runner           PASS
+Restricted Kubernetes kubeconfig          PASS
+Namespace-scoped RBAC                     PASS
+Positive Deployment authorization         PASS
+Negative Secret authorization             PASS
+Release SHA provenance validation         PASS
+Semantic release-tag deployment           PASS
+Kubernetes rollout validation             PASS
+Deployment image verification             PASS
+Runtime immutable image digest            PASS
+Application version reporting             PASS
+Released API feature validation           PASS
+PostgreSQL persistence validation         PASS
+```
+
+Validated release milestones include:
+
+```text
+v0.3.0  First successful self-hosted CD deployment
+v0.4.0  Gateway/API feature and PostgreSQL persistence validation
+v0.5.0  Runtime application-version reporting
+v0.6.0  Automated semantic-version and Git-tag creation
+v0.8.0  Semantic release-tag Kubernetes deployment
+```
+
+---
+
+## Current Operational Deployment Reference
+
+The validated Kubernetes Deployment currently uses:
+
+```text
+ghcr.io/brunobrunt/havenbridge-api:v0.8.0
+```
+
+The validated runtime image digest is:
+
+```text
+sha256:9830854685b118be4bd9a8a1a2a0048eb5a6a3d32e2a9f8f72f21f8d82e6826c
+```
+
+This is the intended current model:
+
+```text
+Readable release version
+        +
+Git source provenance
+        +
+Immutable runtime artifact identity
+```
+
+---
+
+## Interview Talking Point
+
+A concise explanation of the current HavenBridge CI/CD design is:
+
+> I separated CI, release automation and deployment into distinct stages.
+> GitHub-hosted runners test and build the application and publish versioned
+> images to GHCR. A dedicated self-hosted runner performs Kubernetes deployment
+> because the cluster is private. The runner authenticates through a restricted
+> ServiceAccount and namespace-scoped RBAC rather than administrator
+> credentials. Releases retain the Git SHA for provenance, while Kubernetes
+> deploys the human-readable semantic release tag. I also verify the resulting
+> CRI-O image digest so the running artifact remains traceable to an immutable
+> container image.
+
+---
+
+## Summary
+
+HavenBridge now has an evidence-driven CI/CD implementation that demonstrates:
+
+- Automated application validation.
+- Container build validation.
+- Kubernetes manifest validation.
+- GHCR publication.
+- Semantic-version calculation.
+- Release-aware no-op behavior.
+- Automated annotated Git tagging.
+- Git SHA source provenance.
+- Semantic-tag Kubernetes deployment.
+- Restricted self-hosted runner access.
+- Least-privilege Kubernetes RBAC.
+- Rollout verification.
+- Deployment-image verification.
+- Immutable runtime digest verification.
+- Historical evidence for major CI/CD milestones.
+
+The current release deployment model intentionally separates:
+
+```text
+RELEASE_SHA
+        ↓
+provenance
+
+RELEASE_TAG
+        ↓
+operator-readable deployment
+
+sha256 digest
+        ↓
+immutable runtime artifact
+```
+
+That separation gives HavenBridge both traceability and operational clarity.
