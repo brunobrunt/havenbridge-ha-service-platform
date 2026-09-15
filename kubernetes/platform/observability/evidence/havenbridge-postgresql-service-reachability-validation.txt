@@ -1,0 +1,261 @@
+HavenBridge PostgreSQL Service Reachability Validation
+======================================================
+
+Phase:
+Observability Phase 9 — PostgreSQL Service Reachability Monitoring
+
+Objective
+---------
+Validate that HavenBridge can detect a PostgreSQL Service connectivity
+failure even when the PostgreSQL Pod itself remains Running and Ready.
+
+The validation specifically monitors whether the application PostgreSQL
+Service has at least one Ready EndpointSlice backend.
+
+Healthy Baseline
+----------------
+
+PostgreSQL Pod:
+
+  havenbridge-postgres-0   1/1   Running
+
+PostgreSQL application Service EndpointSlice:
+
+  havenbridge-postgres-2mhcs
+  Port: 5432
+  Ready endpoint: 10.244.35.96
+
+Prometheus healthy endpoint query:
+
+  (
+    sum(
+      kube_endpointslice_endpoints{
+        namespace="havenbridge",
+        endpointslice=~"havenbridge-postgres-[^-]+$",
+        ready="true"
+      }
+    )
+    or vector(0)
+  ) > bool 0
+
+Healthy result:
+
+  1
+
+PostgreSQL Pod Ready query:
+
+  max(
+    kube_pod_status_ready{
+      namespace="havenbridge",
+      pod=~"havenbridge-postgres-.*",
+      condition="true"
+    }
+  ) or vector(0)
+
+Healthy result:
+
+  1
+
+The PostgreSQL Pod was healthy and the application Service had a Ready
+EndpointSlice backend.
+
+Failure Injection
+-----------------
+
+A controlled Service-selector failure was introduced:
+
+  kubectl -n havenbridge patch service havenbridge-postgres \
+    --type=merge \
+    -p '{"spec":{"selector":{"incident":"postgres-disconnected"}}}'
+
+This added a selector that did not match the PostgreSQL Pod.
+
+The PostgreSQL Pod itself remained Running/Ready, but the application
+Service no longer had a Ready backend.
+
+This reproduced the important failure condition:
+
+  PostgreSQL Pod Ready = 1
+  PostgreSQL Service Endpoint = 0
+
+Prometheus Alert
+----------------
+
+Alert:
+
+  HavenBridgePostgreSQLConnectivityFailure
+
+Condition:
+
+  PostgreSQL Pod is Ready
+  AND
+  PostgreSQL application Service has zero Ready EndpointSlice backends
+
+Duration:
+
+  2 minutes
+
+Severity:
+
+  critical
+
+Observed lifecycle:
+
+  inactive
+      ->
+  pending
+      ->
+  firing
+
+The alert rule remained healthy while firing.
+
+Alertmanager / Discord Validation
+---------------------------------
+
+Alertmanager successfully delivered the firing notification to Discord.
+
+Observed notification:
+
+  HavenBridgePostgreSQLConnectivityFailure - firing
+
+Severity:
+
+  critical
+
+This confirms the alert pipeline:
+
+  kube-state-metrics
+      ->
+  Prometheus
+      ->
+  Alertmanager
+      ->
+  Discord
+
+Recovery
+--------
+
+The temporary incident selector was removed:
+
+  kubectl -n havenbridge patch service havenbridge-postgres \
+    --type=json \
+    -p='[{"op":"remove","path":"/spec/selector/incident"}]'
+
+The original Service selectors were restored:
+
+  app.kubernetes.io/instance=havenbridge-postgres
+  app.kubernetes.io/name=postgresql
+
+PostgreSQL EndpointSlice recovered:
+
+  havenbridge-postgres-2mhcs
+  Port: 5432
+  Ready endpoint: 10.244.35.96
+
+PostgreSQL Pod:
+
+  havenbridge-postgres-0   1/1   Running
+
+HavenBridge API:
+
+  Deployment: 2/2 Ready
+
+  Both HavenBridge API Pods returned to/maintained Running and Ready state.
+
+Prometheus endpoint query after recovery:
+
+  1
+
+Connectivity-failure expression after recovery:
+
+  no result
+
+Alert state after recovery:
+
+  inactive
+
+Alert health:
+
+  ok
+
+External application validation:
+
+  HTTP 200
+
+Grafana Validation
+------------------
+
+A new Git-managed Grafana panel was added:
+
+  HavenBridge PostgreSQL Service Endpoint
+
+Dashboard:
+
+  HavenBridge — Operations Overview
+
+Visualization:
+
+  Stat
+
+Healthy value mapping:
+
+  1 -> HEALTHY
+
+Failure value mapping:
+
+  0 -> NO ENDPOINT
+
+Healthy color:
+
+  dark green
+
+Failure color:
+
+  dark red
+
+The dashboard was deployed through the existing Kustomize-generated
+ConfigMap:
+
+  havenbridge-operations-grafana-dashboard
+
+Grafana successfully reprovisioned the dashboard from the Kubernetes
+ConfigMap.
+
+Final Grafana state:
+
+  HavenBridge PostgreSQL Pod Ready
+      HEALTHY
+
+  HavenBridge PostgreSQL Recent Restarts
+      NO RECENT RESTARTS
+
+  HavenBridge PostgreSQL Service Endpoint
+      HEALTHY
+
+Important Observation
+---------------------
+
+Kubernetes Pod readiness and Service reachability are different signals.
+
+A PostgreSQL Pod can remain Running and Ready while the application
+Service has no usable backend.
+
+This incident also demonstrated that an application may temporarily
+continue using an already-established PostgreSQL connection from its
+SQLAlchemy connection pool even after the Kubernetes Service selector
+has been broken.
+
+Therefore, application readiness alone is not sufficient to prove that
+new connections can still be established through the PostgreSQL Service.
+
+The EndpointSlice signal provides independent evidence that the Service
+currently has a Ready backend available for new application traffic.
+
+Result
+------
+
+PASS
+
+HavenBridge can now detect, alert on, visualize, and recover from the
+specific condition where the PostgreSQL Pod remains healthy but the
+application PostgreSQL Service loses all Ready EndpointSlice backends.

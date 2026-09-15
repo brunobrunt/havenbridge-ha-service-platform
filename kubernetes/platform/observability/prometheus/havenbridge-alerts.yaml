@@ -92,3 +92,36 @@ spec:
           annotations:
             summary: "HavenBridge API P95 latency is high"
             description: "HavenBridge API P95 request latency has exceeded 500 milliseconds for at least 2 minutes."
+        - alert: HavenBridgePostgreSQLConnectivityFailure
+          expr: |
+            (
+              max(
+                kube_pod_status_ready{
+                  namespace="havenbridge",
+                  pod=~"havenbridge-postgres-.*",
+                  condition="true"
+                }
+              ) == 1
+            )
+            and
+            (
+              (
+                sum(
+                  kube_endpointslice_endpoints{
+                    namespace="havenbridge",
+                    endpointslice=~"havenbridge-postgres-[^-]+$",
+                    ready="true"
+                  }
+                )
+                or vector(0)
+              ) == 0
+            )
+
+          for: 2m
+
+          labels:
+            severity: critical
+
+          annotations:
+            summary: "HavenBridge PostgreSQL Service connectivity has failed"
+            description: "The HavenBridge PostgreSQL Pod is Ready, but the application PostgreSQL Service has had no Ready EndpointSlice backend for at least 2 minutes."

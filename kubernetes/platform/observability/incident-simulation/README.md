@@ -1,7 +1,8 @@
 # HavenBridge Incident Simulation
 
 This directory documents controlled HavenBridge failure scenarios performed
-during Observability Phase 8.
+during Observability Phase 8 and the follow-up observability improvements
+validated during Observability Phase 9.
 
 The purpose of these simulations is to validate the operational workflow:
 
@@ -916,7 +917,10 @@ HavenBridge API
 This scenario was intentionally different from simply deleting the PostgreSQL
 Pod.
 
-The test was designed to isolate the application-to-database connectivity path.
+The test was designed to isolate the application-to-database connectivity path
+and later became the basis for an Observability Phase 9 improvement that added
+direct PostgreSQL Service EndpointSlice monitoring, alerting, Grafana
+visualization, and preserved validation evidence.
 
 ---
 
@@ -981,7 +985,8 @@ EndpointSlice
 ```
 
 This was safer than deleting the PostgreSQL Pod or modifying the database
-NetworkPolicies.
+NetworkPolicies because it disturbed only the Service-to-Pod routing
+relationship.
 
 ---
 
@@ -995,7 +1000,7 @@ kubectl -n havenbridge patch service havenbridge-postgres \
   -p '{"spec":{"selector":{"incident":"postgres-disconnected"}}}'
 ```
 
-The equivalent Kubernetes Service shorthand was also used during testing:
+The equivalent Kubernetes Service shorthand is:
 
 ```bash
 kubectl -n havenbridge patch svc havenbridge-postgres \
@@ -1011,6 +1016,300 @@ incident=postgres-disconnected
 
 Since the PostgreSQL Pod did not have this label, the Service stopped resolving
 to the database Pod.
+
+---
+
+### Understanding `kubectl patch` in This Incident
+
+This incident used `kubectl patch` rather than replacing the entire PostgreSQL
+Service manifest.
+
+`kubectl patch` modifies selected fields on an existing Kubernetes object while
+leaving unrelated fields intact.
+
+The general form is:
+
+```bash
+kubectl patch <resource> <name> \
+  --type=<patch-type> \
+  -p '<patch-payload>'
+```
+
+The important options are:
+
+| Option | Meaning |
+|---|---|
+| `patch` | Modify fields on an existing Kubernetes resource |
+| `--type` | Select how Kubernetes interprets the patch payload |
+| `-p` | Provide the patch payload directly on the command line |
+| `--patch` | Long form of `-p` |
+| `--patch-file` | Read the patch payload from a file instead |
+
+`-p` means **patch payload**. It does not mean PostgreSQL, Pod, or path.
+
+For example:
+
+```bash
+-p '{"spec":{"selector":{"incident":"postgres-disconnected"}}}'
+```
+
+is the JSON payload describing the field Kubernetes should modify.
+
+#### Patch Types
+
+The three patch styles most relevant to this project are:
+
+```text
+strategic
+merge
+json
+```
+
+They are not interchangeable.
+
+#### Strategic Merge Patch
+
+Example:
+
+```bash
+kubectl patch deployment example \
+  --type=strategic \
+  -p '{"spec":{"replicas":3}}'
+```
+
+Strategic Merge Patch understands Kubernetes object structure and can apply
+Kubernetes-aware merge behavior to supported built-in resource types.
+
+It is useful when structured fields, especially lists, need Kubernetes-aware
+merging.
+
+Strategic Merge Patch is not supported uniformly by every resource type,
+particularly CustomResourceDefinitions.
+
+#### JSON Merge Patch
+
+Incident 3 used:
+
+```text
+--type=merge
+```
+
+with:
+
+```bash
+kubectl -n havenbridge patch service havenbridge-postgres \
+  --type=merge \
+  -p '{"spec":{"selector":{"incident":"postgres-disconnected"}}}'
+```
+
+JSON Merge Patch merges the supplied object into the existing Kubernetes
+resource.
+
+The patch did not replace the entire Service selector.
+
+Kubernetes retained:
+
+```text
+app.kubernetes.io/instance=havenbridge-postgres
+app.kubernetes.io/name=postgresql
+```
+
+and added:
+
+```text
+incident=postgres-disconnected
+```
+
+This made `--type=merge` appropriate for the failure injection because the goal
+was to add one temporary selector while preserving the rest of the Service.
+
+#### JSON Patch
+
+JSON Patch uses an ordered list of explicit operations.
+
+The Incident 3 recovery used:
+
+```bash
+kubectl -n havenbridge patch service havenbridge-postgres \
+  --type=json \
+  -p='[{"op":"remove","path":"/spec/selector/incident"}]'
+```
+
+The JSON Patch payload was:
+
+```json
+[
+  {
+    "op": "remove",
+    "path": "/spec/selector/incident"
+  }
+]
+```
+
+The field:
+
+```text
+op
+```
+
+specifies the operation to perform.
+
+The field:
+
+```text
+path
+```
+
+specifies the exact location inside the Kubernetes object.
+
+Therefore:
+
+```text
+op   = remove
+path = /spec/selector/incident
+```
+
+means:
+
+```text
+remove only spec.selector.incident
+```
+
+The original PostgreSQL selectors remain untouched.
+
+This is why JSON Patch was appropriate for recovery: it precisely removed the
+temporary incident selector without rebuilding or replacing the rest of the
+Service object.
+
+#### JSON Patch Fields
+
+A JSON Patch operation can contain:
+
+| Field | Purpose |
+|---|---|
+| `op` | Operation to perform |
+| `path` | Target JSON path inside the Kubernetes object |
+| `value` | New value used by operations such as `add`, `replace`, and `test` |
+| `from` | Source path used by `move` and `copy` |
+
+#### JSON Patch Operations
+
+Common JSON Patch operations include:
+
+| Operation | Purpose |
+|---|---|
+| `add` | Add a new value |
+| `remove` | Remove an existing value |
+| `replace` | Replace an existing value |
+| `move` | Move a value from one JSON path to another |
+| `copy` | Copy a value from one JSON path to another |
+| `test` | Verify that a value matches an expected value before continuing |
+
+Example `add`:
+
+```json
+[
+  {
+    "op": "add",
+    "path": "/metadata/labels/test",
+    "value": "true"
+  }
+]
+```
+
+Example `replace`:
+
+```json
+[
+  {
+    "op": "replace",
+    "path": "/spec/replicas",
+    "value": 3
+  }
+]
+```
+
+Example `remove`:
+
+```json
+[
+  {
+    "op": "remove",
+    "path": "/metadata/labels/test"
+  }
+]
+```
+
+`move` and `copy` use a `from` field. For example:
+
+```json
+[
+  {
+    "op": "copy",
+    "from": "/metadata/labels/app",
+    "path": "/metadata/labels/copied-app"
+  }
+]
+```
+
+For Incident 3, only the precise `remove` operation was required during
+recovery.
+
+#### Patch-Type Comparison
+
+```text
+--type=strategic
+    Kubernetes-aware merging for supported built-in resources
+
+--type=merge
+    simple JSON field merge
+
+--type=json
+    precise ordered operations against exact JSON paths
+```
+
+For this incident:
+
+```text
+Failure injection
+    → --type=merge
+    → add one temporary selector
+
+Recovery
+    → --type=json
+    → remove exactly that selector
+```
+
+#### Previewing a Patch Safely
+
+A patch can be previewed before changing the live resource.
+
+Client-side preview:
+
+```bash
+kubectl -n havenbridge patch service havenbridge-postgres \
+  --type=merge \
+  -p '{"spec":{"selector":{"incident":"postgres-disconnected"}}}' \
+  --dry-run=client \
+  -o yaml
+```
+
+Server-side preview:
+
+```bash
+kubectl -n havenbridge patch service havenbridge-postgres \
+  --type=merge \
+  -p '{"spec":{"selector":{"incident":"postgres-disconnected"}}}' \
+  --dry-run=server \
+  -o yaml
+```
+
+Server-side dry run is especially useful because the Kubernetes API server
+validates the proposed object without persisting the change.
+
+Using a targeted patch was appropriate for this incident because it disturbed
+the smallest practical part of the PostgreSQL connectivity path while leaving
+the Pod, PVC, database data, credentials, and NetworkPolicies unchanged.
 
 ---
 
@@ -1055,7 +1354,7 @@ Run on `eph-cp01`:
 
 ```bash
 kubectl -n havenbridge exec deploy/havenbridge-api -- \
-python -c 'import socket; socket.create_connection(("havenbridge-postgres",5432),timeout=5); print("CONNECTED")'
+  python -c 'import socket; socket.create_connection(("havenbridge-postgres",5432),timeout=5); print("CONNECTED")'
 ```
 
 The result was:
@@ -1088,7 +1387,7 @@ The application endpoint was also tested:
 
 ```bash
 curl --max-time 15 -i \
-https://havenbridge.lab/api/v1/inquiries
+  https://havenbridge.lab/api/v1/inquiries
 ```
 
 Surprisingly, this also initially returned:
@@ -1101,6 +1400,8 @@ and existing service-inquiry records.
 
 This behavior was caused by an important application behavior discovered during
 the test.
+
+---
 
 ### Existing Database Connection Pool
 
@@ -1125,6 +1426,137 @@ application request may still succeed
 ```
 
 This explained why `/api/v1/inquiries` initially continued to work.
+
+---
+
+### Readiness Endpoint and SQLAlchemy Connection-Pool Behaviour
+
+Incident 3 originally appeared to show that the HavenBridge readiness endpoint
+did not validate PostgreSQL.
+
+That initial interpretation was incomplete.
+
+The current HavenBridge `/health/ready` endpoint does validate PostgreSQL.
+
+The readiness route calls the database readiness function, obtains a SQLAlchemy
+connection, and executes:
+
+```sql
+SELECT 1
+```
+
+If that operation fails, the endpoint returns HTTP 503.
+
+If it succeeds, the endpoint returns:
+
+```text
+HTTP 200
+{"status":"ready"}
+```
+
+The important behavior exposed by Incident 3 was therefore not the absence of a
+database check. It was the interaction between Kubernetes Service routing and
+SQLAlchemy connection pooling.
+
+The already-running API Pods had PostgreSQL connections established before the
+Service EndpointSlice was broken.
+
+The sequence was:
+
+```text
+HavenBridge API Pod starts
+        ↓
+PostgreSQL connection established
+        ↓
+connection retained by SQLAlchemy pool
+        ↓
+PostgreSQL Service selector is broken
+        ↓
+EndpointSlice loses the PostgreSQL backend
+        ↓
+new connections through the Service fail
+        ↓
+existing database TCP connection may remain alive
+        ↓
+SQLAlchemy may reuse that existing connection
+        ↓
+SELECT 1 succeeds
+        ↓
+/health/ready may temporarily continue returning HTTP 200
+```
+
+The SQLAlchemy engine also uses connection-pool health checking. A pool health
+check can verify whether a checked-out pooled connection is usable, but it does
+not require a brand-new TCP connection through the Kubernetes Service for every
+readiness request.
+
+This explains why both observations could be true at the same time:
+
+```text
+/health/ready
+    = HTTP 200
+```
+
+while:
+
+```text
+new TCP connection to havenbridge-postgres:5432
+    = timeout
+```
+
+The readiness endpoint answers:
+
+```text
+Can this API instance currently obtain a usable SQLAlchemy connection
+and execute a PostgreSQL query?
+```
+
+The EndpointSlice signal answers:
+
+```text
+Does the Kubernetes PostgreSQL Service currently have at least one
+Ready backend available for new Service-routed traffic?
+```
+
+These are complementary operational signals.
+
+The incident therefore exposed an **observability gap**, not a missing
+PostgreSQL readiness check.
+
+---
+
+### Why Readiness Was Not Changed to Force a New TCP Connection
+
+One possible response would have been to force `/health/ready` to establish a
+brand-new PostgreSQL TCP connection every time Kubernetes executes its
+readiness probe.
+
+That was not selected.
+
+The readiness probe executes frequently. Forcing a completely new database
+connection for every readiness request would create unnecessary database
+connection churn and would work against the purpose of SQLAlchemy connection
+pooling.
+
+The existing readiness endpoint still provides useful application-level
+evidence:
+
+```text
+Can this API Pod currently obtain a usable SQLAlchemy connection and
+execute a PostgreSQL query?
+```
+
+The missing signal was different:
+
+```text
+Does the PostgreSQL Kubernetes Service currently have a Ready backend
+available for new Service-routed connections?
+```
+
+That question belongs naturally to Kubernetes and infrastructure monitoring.
+
+The solution was therefore to preserve application connection-pool behavior and
+add an independent PostgreSQL Service EndpointSlice signal.
 
 ---
 
@@ -1288,7 +1720,7 @@ The PostgreSQL Pod itself really was healthy.
 However:
 
 ```text
-API → PostgreSQL connectivity
+API → PostgreSQL Service connectivity
 ```
 
 was broken.
@@ -1302,7 +1734,7 @@ database Pod health
 and:
 
 ```text
-application-to-database connectivity
+application-to-database Service connectivity
 ```
 
 The PostgreSQL Pod readiness metric alone could not detect this failure.
@@ -1311,57 +1743,12 @@ The PostgreSQL Pod readiness metric alone could not detect this failure.
 
 ---
 
-### Readiness Endpoint Gap
+### Why No Critical API Alert Fired During the Original Incident
 
-Another important finding was that:
+The existing `HavenBridgeAPIUnavailable` alert is designed to fire when all
+HavenBridge API targets are unavailable.
 
-```text
-/health/ready
-```
-
-continued returning:
-
-```text
-HTTP 200
-```
-
-even when a fresh PostgreSQL connection could not be established.
-
-The current readiness endpoint therefore proves:
-
-```text
-FastAPI process is available
-```
-
-but does not currently prove:
-
-```text
-FastAPI can successfully reach PostgreSQL
-```
-
-This is an application maturity improvement identified for a later phase.
-
-A future readiness implementation should perform a lightweight database
-dependency check so Kubernetes can distinguish:
-
-```text
-application process running
-```
-
-from:
-
-```text
-application actually ready to serve database-backed requests
-```
-
----
-
-### Why No Critical API Alert Fired
-
-The `HavenBridgeAPIUnavailable` alert is designed to fire when all HavenBridge
-API targets are unavailable.
-
-During this incident:
+During the original Incident 3 simulation:
 
 ```text
 one API replica
@@ -1379,7 +1766,544 @@ The alert panel correctly showed:
 NO ACTIVE ALERTS
 ```
 
-This was expected behavior for the current alert design.
+That was expected behavior for the API-unavailable alert.
+
+The original incident therefore identified a separate failure mode that needed
+its own signal and its own alert.
+
+That follow-up work became Observability Phase 9.
+
+---
+
+## Observability Phase 9 Follow-Up — PostgreSQL Service Reachability Monitoring
+
+### Why the Follow-Up Was Required
+
+Incident 3 established the condition:
+
+```text
+PostgreSQL Pod
+    = Running and Ready
+
+but
+
+havenbridge-postgres Service
+    = no Ready EndpointSlice backend
+```
+
+The direct TCP test proved that a new connection could not be established even
+while PostgreSQL Pod readiness remained healthy.
+
+The follow-up therefore focused on the question:
+
+```text
+Does the havenbridge-postgres Service currently have at least one
+Ready EndpointSlice backend?
+```
+
+This signal is independent of PostgreSQL Pod readiness and directly represents
+the Kubernetes Service routing path needed for new application connections.
+
+---
+
+### kube-state-metrics EndpointSlice Signal
+
+The cluster's kube-state-metrics instance exposes EndpointSlice information
+through metrics including:
+
+```text
+kube_endpointslice_created
+kube_endpointslice_endpoints
+kube_endpointslice_info
+kube_endpointslice_ports
+```
+
+The metric used for this follow-up is:
+
+```text
+kube_endpointslice_endpoints
+```
+
+The application PostgreSQL Service EndpointSlice is selected with:
+
+```text
+endpointslice=~"havenbridge-postgres-[^-]+$"
+```
+
+This expression intentionally matches the application PostgreSQL Service
+EndpointSlice while excluding the separate PostgreSQL headless Service
+EndpointSlice.
+
+The healthy endpoint-count query is:
+
+```promql
+sum(
+  kube_endpointslice_endpoints{
+    namespace="havenbridge",
+    endpointslice=~"havenbridge-postgres-[^-]+$",
+    ready="true"
+  }
+) or vector(0)
+```
+
+Healthy baseline result:
+
+```text
+1
+```
+
+During the controlled Service-selector failure:
+
+```text
+0
+```
+
+The PostgreSQL Pod readiness query is:
+
+```promql
+max(
+  kube_pod_status_ready{
+    namespace="havenbridge",
+    pod=~"havenbridge-postgres-.*",
+    condition="true"
+  }
+) or vector(0)
+```
+
+Healthy baseline result:
+
+```text
+1
+```
+
+This allowed the platform to distinguish:
+
+```text
+PostgreSQL Pod Ready = 1
+```
+
+from:
+
+```text
+PostgreSQL Service Ready Endpoints = 0
+```
+
+---
+
+### PostgreSQL Service Connectivity Alert
+
+A dedicated Prometheus alert was added:
+
+```text
+HavenBridgePostgreSQLConnectivityFailure
+```
+
+The alert expression is:
+
+```promql
+(
+  max(
+    kube_pod_status_ready{
+      namespace="havenbridge",
+      pod=~"havenbridge-postgres-.*",
+      condition="true"
+    }
+  ) == 1
+)
+and
+(
+  (
+    sum(
+      kube_endpointslice_endpoints{
+        namespace="havenbridge",
+        endpointslice=~"havenbridge-postgres-[^-]+$",
+        ready="true"
+      }
+    )
+    or vector(0)
+  ) == 0
+)
+```
+
+The alert means:
+
+```text
+PostgreSQL Pod is Ready
+        AND
+PostgreSQL application Service has zero Ready EndpointSlice backends
+```
+
+Configuration:
+
+```text
+Alert:
+HavenBridgePostgreSQLConnectivityFailure
+
+Severity:
+critical
+
+Duration:
+2 minutes
+
+Summary:
+HavenBridge PostgreSQL Service connectivity has failed
+```
+
+The description states that the PostgreSQL Pod is Ready while the application
+PostgreSQL Service has had no Ready EndpointSlice backend for at least two
+minutes.
+
+The two-minute duration reduces the chance of alerting on a very short
+transient EndpointSlice update.
+
+---
+
+### Alert Lifecycle Validation
+
+The new alert was validated through its complete Prometheus state lifecycle.
+
+Healthy baseline:
+
+```text
+state = inactive
+health = ok
+alerts = []
+```
+
+After the PostgreSQL Service selector was broken:
+
+```text
+state = pending
+```
+
+After the condition remained present for two minutes:
+
+```text
+state = firing
+severity = critical
+health = ok
+```
+
+Alertmanager then delivered the firing notification to Discord:
+
+```text
+HavenBridgePostgreSQLConnectivityFailure - firing
+```
+
+This validated the alert path:
+
+```text
+Kubernetes EndpointSlice
+        ↓
+kube-state-metrics
+        ↓
+Prometheus
+        ↓
+HavenBridgePostgreSQLConnectivityFailure
+        ↓
+Alertmanager
+        ↓
+Discord
+```
+
+A Discord firing notification was explicitly validated.
+
+A resolved Discord notification was not required as proof for this phase and
+should not be assumed unless separately captured.
+
+---
+
+### Grafana PostgreSQL Service Endpoint Panel
+
+The Git-managed:
+
+```text
+HavenBridge — Operations Overview
+```
+
+dashboard was extended with:
+
+```text
+HavenBridge PostgreSQL Service Endpoint
+```
+
+Visualization:
+
+```text
+Stat
+```
+
+Panel description:
+
+```text
+Shows whether the HavenBridge application PostgreSQL Service currently
+has at least one Ready EndpointSlice backend available for application
+traffic.
+```
+
+The panel query is:
+
+```promql
+(
+  sum(
+    kube_endpointslice_endpoints{
+      namespace="havenbridge",
+      endpointslice=~"havenbridge-postgres-[^-]+$",
+      ready="true"
+    }
+  )
+  or vector(0)
+) > bool 0
+```
+
+The `> bool 0` comparison converts the endpoint count into an operational
+boolean:
+
+```text
+1
+    → HEALTHY
+
+0
+    → NO ENDPOINT
+```
+
+Panel settings:
+
+```text
+Visualization:
+    Stat
+
+Query mode:
+    Instant
+
+Range:
+    false
+
+Legend:
+    PostgreSQL Service Endpoint
+
+Calculation:
+    Last (not null)
+
+Minimum:
+    0
+
+Maximum:
+    1
+
+Graph mode:
+    none
+
+Text mode:
+    value
+
+Threshold mode:
+    absolute
+```
+
+Value mappings:
+
+```text
+1
+    → HEALTHY
+    → dark green
+
+0
+    → NO ENDPOINT
+    → dark red
+```
+
+The panel was assigned:
+
+```text
+panel key:
+    panel-13
+
+panel id:
+    13
+```
+
+Layout:
+
+```text
+x      = 0
+y      = 48
+width  = 12
+height = 8
+```
+
+---
+
+### Git-Managed Grafana Provisioning
+
+The HavenBridge Operations Overview dashboard is not manually saved in Grafana.
+
+Grafana reports the dashboard as file provisioned, so Git remains the source of
+truth.
+
+The dashboard source is:
+
+```text
+kubernetes/platform/observability/grafana/dashboards/
+havenbridge-operations-overview.json
+```
+
+The Kustomize configuration is:
+
+```text
+kubernetes/platform/observability/grafana/dashboards/
+kustomization.yaml
+```
+
+It uses `configMapGenerator` to package the Grafana dashboard JSON into:
+
+```text
+havenbridge-operations-grafana-dashboard
+```
+
+in namespace:
+
+```text
+observability
+```
+
+The provisioning path is:
+
+```text
+Git-managed dashboard JSON
+        ↓
+Kustomize configMapGenerator
+        ↓
+havenbridge-operations-grafana-dashboard ConfigMap
+        ↓
+Grafana file provisioning
+        ↓
+HavenBridge — Operations Overview
+```
+
+The dashboard was validated locally as JSON with:
+
+```bash
+jq empty \
+  kubernetes/platform/observability/grafana/dashboards/havenbridge-operations-overview.json
+```
+
+The Kustomize render was validated on `eph-cp01`:
+
+```bash
+kubectl kustomize /tmp/havenbridge-grafana-dashboards \
+  | grep -n -A8 -B3 \
+  'HavenBridge PostgreSQL Service Endpoint'
+```
+
+A server-side dry run then confirmed that the generated ConfigMaps were valid:
+
+```bash
+kubectl apply \
+  --dry-run=server \
+  -k /tmp/havenbridge-grafana-dashboards
+```
+
+Observed result:
+
+```text
+configmap/havenbridge-api-grafana-dashboard unchanged (server dry run)
+configmap/havenbridge-operations-grafana-dashboard configured (server dry run)
+```
+
+The dashboard was then applied through Kustomize:
+
+```bash
+kubectl apply \
+  -k /tmp/havenbridge-grafana-dashboards
+```
+
+#### Why `-k` Was Used Instead of `-f`
+
+The dashboard directory contains a `kustomization.yaml` with
+`configMapGenerator`.
+
+The dashboard JSON files themselves are Grafana dashboard definitions. They are
+not standalone Kubernetes resource manifests.
+
+Therefore:
+
+```text
+kubectl apply -f
+```
+
+would mean:
+
+```text
+apply this Kubernetes manifest directly
+```
+
+while:
+
+```text
+kubectl apply -k
+```
+
+means:
+
+```text
+read kustomization.yaml
+        ↓
+run Kustomize
+        ↓
+generate Kubernetes ConfigMaps
+        ↓
+apply the generated resources
+```
+
+Conceptually:
+
+```bash
+kubectl apply -k /tmp/havenbridge-grafana-dashboards
+```
+
+is equivalent to:
+
+```bash
+kubectl kustomize /tmp/havenbridge-grafana-dashboards \
+  | kubectl apply -f -
+```
+
+This is why `-k` is the correct option for the Git-managed HavenBridge Grafana
+dashboard provisioning path.
+
+---
+
+### Live Grafana Validation
+
+After the ConfigMap update was provisioned, the dashboard displayed:
+
+```text
+HavenBridge PostgreSQL Pod Ready
+    HEALTHY
+
+HavenBridge PostgreSQL Recent Restarts
+    NO RECENT RESTARTS
+
+HavenBridge PostgreSQL Service Endpoint
+    HEALTHY
+```
+
+This confirmed that the new panel was loaded through the Git-managed
+provisioning path rather than being stored as an unsupported manual Grafana UI
+change.
+
+The new Service Endpoint panel provides the missing operational distinction:
+
+```text
+PostgreSQL Pod Ready
+    ↓
+Is the database Pod healthy?
+
+PostgreSQL Service Endpoint
+    ↓
+Can the Kubernetes Service currently route to a Ready backend?
+```
 
 ---
 
@@ -1401,7 +2325,12 @@ This removed only:
 incident=postgres-disconnected
 ```
 
-and preserved the original PostgreSQL Service selectors.
+and preserved the original PostgreSQL Service selectors:
+
+```text
+app.kubernetes.io/instance=havenbridge-postgres
+app.kubernetes.io/name=postgresql
+```
 
 ---
 
@@ -1415,12 +2344,26 @@ kubectl -n havenbridge get endpointslice \
   -o wide
 ```
 
-The PostgreSQL endpoint returned:
+During the original Incident 3 recovery, the PostgreSQL endpoint returned:
 
 ```text
 PORTS       5432
 ENDPOINTS   10.244.35.122
 ```
+
+During the later Phase 9 validation, the current application PostgreSQL
+EndpointSlice was observed as:
+
+```text
+havenbridge-postgres-2mhcs
+Port: 5432
+Ready endpoint: 10.244.35.96
+```
+
+The difference in Pod IP is expected because Pod addresses can change over time.
+
+The important validation is that the EndpointSlice again contained a Ready
+backend.
 
 The restored flow was:
 
@@ -1429,7 +2372,7 @@ HavenBridge API
         ↓
 havenbridge-postgres Service
         ↓
-10.244.35.122:5432
+Ready EndpointSlice backend
         ↓
 PostgreSQL Pod
 ```
@@ -1456,7 +2399,7 @@ to:
 1/1 Running
 ```
 
-The Deployment was then validated:
+The Deployment was validated:
 
 ```bash
 kubectl -n havenbridge get deployment havenbridge-api
@@ -1511,11 +2454,34 @@ Deployment
 PostgreSQL Pod Ready
     → HEALTHY
 
-PostgreSQL EndpointSlice
-    → 10.244.35.122:5432
+PostgreSQL Service Endpoint
+    → HEALTHY
 
 Firing HavenBridge Alerts
     → NO ACTIVE ALERTS
+```
+
+Prometheus endpoint signal after recovery:
+
+```text
+1
+```
+
+The combined PostgreSQL connectivity-failure expression returned no matching
+series.
+
+The dedicated alert returned to:
+
+```text
+state = inactive
+alerts = []
+health = ok
+```
+
+External HavenBridge validation returned:
+
+```text
+HTTP 200
 ```
 
 ![HavenBridge healthy after Incident 3 recovery](screenshots/incident-03-postgresql-connectivity/09-after-recovery-healthy-overview.png)
@@ -1524,7 +2490,7 @@ Firing HavenBridge Alerts
 
 ### Recent Restart Window Observation
 
-During the incident the:
+During the original incident the:
 
 ```text
 HavenBridge Recent Pod Restarts
@@ -1661,11 +2627,87 @@ HavenBridge PostgreSQL Pod Ready
 HavenBridge PostgreSQL Recent Restarts
     → NO RECENT RESTARTS
 
+HavenBridge PostgreSQL Service Endpoint
+    → HEALTHY
+
 Firing HavenBridge Alerts
     → NO ACTIVE ALERTS
 ```
 
 ![Final Incident 3 healthy state](screenshots/incident-03-postgresql-connectivity/10-after-recovery-health-and-restarts.png)
+
+---
+
+### Final Observability Model
+
+Incident 3 and its Phase 9 follow-up demonstrated that several health signals
+are required to understand the PostgreSQL dependency correctly.
+
+The platform now distinguishes:
+
+```text
+PostgreSQL Pod readiness
+```
+
+from:
+
+```text
+API database-query readiness
+```
+
+from:
+
+```text
+PostgreSQL Kubernetes Service reachability
+```
+
+These answer different questions.
+
+```text
+PostgreSQL Pod Ready
+    ↓
+Is Kubernetes reporting the database Pod as Ready?
+
+/health/ready
+    ↓
+Can the API currently obtain a usable SQLAlchemy connection
+and execute a PostgreSQL query?
+
+PostgreSQL Service Endpoint
+    ↓
+Does the application PostgreSQL Service currently have at least
+one Ready EndpointSlice backend?
+```
+
+Together they provide stronger operational evidence than any single signal
+alone.
+
+The resulting model is:
+
+```text
+PostgreSQL Pod
+    ↓
+Pod readiness metric
+    ↓
+Prometheus
+         \
+          \
+HavenBridge API
+    ↓      \
+/health/ready \
+              → Grafana + Alerting
+             /
+PostgreSQL Service
+    ↓       /
+EndpointSlice
+    ↓     /
+kube-state-metrics
+    ↓
+Prometheus
+```
+
+This preserves normal application connection pooling while independently
+monitoring the Kubernetes Service path required for new PostgreSQL connections.
 
 ---
 
@@ -1713,6 +2755,10 @@ CrashLooping API replica starts
         ↓
 Deployment returns to 2/2
         ↓
+Prometheus Service Endpoint signal returns to 1
+        ↓
+HavenBridgePostgreSQLConnectivityFailure returns inactive
+        ↓
 Grafana returns to HEALTHY
         ↓
 restart events age out of five-minute window
@@ -1724,54 +2770,194 @@ Recent Pod Restarts returns to 0
 
 ### Operational Lessons
 
-Incident 3 demonstrated several important production concepts.
+Incident 3 and its Phase 9 follow-up demonstrated several production concepts.
 
-1. A healthy PostgreSQL Pod does not guarantee that applications can reach it.
+1. A Running and Ready PostgreSQL Pod does not prove that the Kubernetes
+   Service can currently route new connections to it.
 
-2. Kubernetes Service and EndpointSlice state must be checked when
-   troubleshooting application-to-database connectivity.
+2. Kubernetes Service health, EndpointSlice state, and Pod health must be
+   treated as separate but related observability signals.
 
-3. Existing connection pools can temporarily hide a new connectivity failure.
+3. Existing TCP/database connections can survive after the Kubernetes Service
+   routing path is broken.
 
-4. Restarting or replacing an application Pod forces a fresh dependency
-   connection and may expose an otherwise hidden failure.
+4. SQLAlchemy connection pooling can therefore allow existing application
+   requests and readiness checks to continue temporarily even when fresh
+   Service-routed connections fail.
 
-5. `CrashLoopBackOff` is a symptom. Application logs revealed the actual cause:
+5. Restarting or replacing an application Pod forces a fresh dependency
+   connection and may expose an otherwise hidden Service-routing failure.
+
+6. `CrashLoopBackOff` is a symptom. Application logs revealed the actual cause:
    PostgreSQL connection timeout.
 
-6. One surviving API replica prevented a complete HavenBridge outage.
+7. One surviving API replica prevented a complete HavenBridge outage.
 
-7. PostgreSQL Pod readiness and API-to-PostgreSQL connectivity are different
-   observability signals.
+8. The HavenBridge `/health/ready` endpoint does validate PostgreSQL by
+   executing a lightweight query. Incident 3 did not prove that the database
+   readiness check was missing.
 
-8. The current HavenBridge `/health/ready` endpoint does not validate PostgreSQL
-   connectivity and should be improved during a later application-maturity
-   phase.
+9. Application database readiness and Kubernetes Service reachability answer
+   different operational questions and should be monitored together.
 
-9. Prometheus rolling time windows intentionally preserve recent incident
-   evidence after recovery.
+10. Forcing a brand-new PostgreSQL TCP connection for every Kubernetes
+    readiness probe would create unnecessary connection churn and was not
+    required to close this observability gap.
 
-10. Kubernetes restart counters are cumulative, while Grafana
+11. `kube_endpointslice_endpoints` provides direct Kubernetes evidence that the
+    PostgreSQL application Service has a Ready backend.
+
+12. `HavenBridgePostgreSQLConnectivityFailure` now detects the specific
+    condition where PostgreSQL remains Ready but its application Service loses
+    all Ready EndpointSlice backends.
+
+13. Alert validation should include the complete lifecycle:
+
+    ```text
+    inactive
+        ↓
+    pending
+        ↓
+    firing
+        ↓
+    recovery
+        ↓
+    inactive
+    ```
+
+14. A firing Alertmanager notification to Discord was validated. Resolved
+    notification delivery should only be documented when separately captured.
+
+15. Prometheus rolling time windows intentionally preserve recent incident
+    evidence after recovery.
+
+16. Kubernetes restart counters are cumulative, while Grafana
     `increase(...[5m])` shows only recent restart activity.
 
-11. Safe incident simulations should disturb the smallest possible component
-    and leave persistent storage and application data untouched.
+17. Git-provisioned Grafana dashboards should be updated through the dashboard
+    JSON and Kubernetes provisioning path rather than saved manually in the
+    Grafana UI.
+
+18. `kubectl apply -k` is appropriate for the dashboard directory because
+    Kustomize must first generate ConfigMaps from the Grafana JSON files.
+
+19. Targeted `kubectl patch` operations are preferable to destructive changes
+    when a controlled incident can be reproduced by modifying only the required
+    field.
+
+20. JSON Merge Patch was appropriate for adding the temporary incident selector,
+    while JSON Patch was appropriate for precisely removing that selector
+    during recovery.
+
+21. Safe incident simulations should disturb the smallest practical component
+    and leave persistent storage, application data, credentials, and unrelated
+    networking controls untouched.
+
+---
+
+### Validation Evidence
+
+The Phase 9 validation evidence is preserved at:
+
+```text
+kubernetes/platform/observability/evidence/
+havenbridge-postgresql-service-reachability-validation.txt
+```
+
+The evidence records:
+
+```text
+healthy baseline
+        ↓
+EndpointSlice failure injection
+        ↓
+PostgreSQL Pod remains Ready
+        ↓
+Service Endpoint signal becomes 0
+        ↓
+alert pending
+        ↓
+alert firing
+        ↓
+Discord firing notification
+        ↓
+Service selector recovery
+        ↓
+EndpointSlice returns
+        ↓
+Service Endpoint signal returns 1
+        ↓
+alert returns inactive
+        ↓
+Grafana panel shows HEALTHY
+        ↓
+external HTTP 200
+```
+
+---
 
 ### Incident Result
 
 ```text
-Incident injection          PASS
-PostgreSQL Pod preserved    PASS
-Persistent storage safe     PASS
-DB connectivity failure     PASS
-Fresh connection test       PASS
-CrashLoop detected          PASS
-Degraded API detected       PASS
-Centralized logs detected   PASS
-Service recovery            PASS
-Endpoint recovery           PASS
-API returned to 2/2         PASS
-Grafana returned healthy    PASS
+Original Incident 3
+-------------------
+Incident injection                                  PASS
+PostgreSQL Pod preserved                            PASS
+Persistent storage safe                             PASS
+DB connectivity failure                             PASS
+Fresh connection test                               PASS
+CrashLoop detected                                  PASS
+Degraded API detected                               PASS
+Centralized logs detected                           PASS
+Service recovery                                    PASS
+Endpoint recovery                                   PASS
+API returned to 2/2                                 PASS
+Grafana returned healthy                            PASS
+
+Observability Phase 9 Follow-Up
+-------------------------------
+EndpointSlice metric identified                      PASS
+Healthy PostgreSQL endpoint baseline = 1             PASS
+PostgreSQL Pod Ready baseline = 1                    PASS
+Dedicated connectivity alert loaded                  PASS
+Alert state inactive → pending                       PASS
+Alert state pending → firing                         PASS
+Critical severity validated                          PASS
+Discord firing notification received                 PASS
+Recovery selector removed                            PASS
+Original Service selectors restored                  PASS
+EndpointSlice Ready backend restored                 PASS
+Endpoint signal returned to 1                        PASS
+Connectivity expression returned no failure          PASS
+Alert returned inactive                              PASS
+Alert rule health remained ok                        PASS
+HavenBridge API 2/2 Ready                            PASS
+External HTTP 200 confirmed                          PASS
+Git-managed Grafana panel provisioned                PASS
+PostgreSQL Service Endpoint panel = HEALTHY          PASS
 ```
 
 **Incident 3 — PostgreSQL Connectivity Failure: PASSED**
+
+**Observability Phase 9 — PostgreSQL Service Reachability Monitoring: PASSED**
+
+The PostgreSQL Service-reachability observability gap discovered during
+Incident 3 is now closed with:
+
+```text
+EndpointSlice monitoring
+        +
+Prometheus alerting
+        +
+Alertmanager notification
+        +
+Discord firing notification
+        +
+Grafana visualization
+        +
+Git-managed dashboard provisioning
+        +
+documented recovery
+        +
+preserved validation evidence
+```
