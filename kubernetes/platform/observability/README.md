@@ -44,32 +44,28 @@ this platform measurable, searchable, and visible.
 
 ## Current Observability Status
 
-The observability phase has started.
+The core HavenBridge monitoring, logging, dashboards, and alerting stack has
+been deployed and validated. The pre-installation baselines later in this README
+are retained as historical evidence, not as a description of the current state.
 
-Current status:
+Status as of September 19, 2026:
 
 ```text
-Observability directory created             COMPLETE
-Cluster baseline validation                 COMPLETE
-Cluster resource preflight                  COMPLETE
-Prometheus installation                     NOT STARTED
-Grafana installation                        NOT STARTED
-HavenBridge application metrics             NOT STARTED
-Loki installation                           NOT STARTED
-Grafana Alloy installation                  NOT STARTED
-Centralized Kubernetes logging              NOT STARTED
-Alerting                                    NOT STARTED
-Incident simulation                         NOT STARTED
-Distributed tracing                         FUTURE
+Observability directory and cluster baseline   COMPLETE
+Prometheus monitoring stack                    COMPLETE
+Grafana and application dashboards             COMPLETE
+HavenBridge API HTTP metrics                   COMPLETE
+Loki and Grafana Alloy log collection          COMPLETE
+Prometheus alerting and notifications          COMPLETE
+Phase 8 incident simulation                    COMPLETE
+Phase 9 PostgreSQL Service reachability alert  COMPLETE
+Phase 10 HTTP counter and SLI formula tests    COMPLETE
+Phase 10 rolling 30-day SLO evaluation         NOT YET MEASURED
+Distributed tracing                            FUTURE
 ```
 
-No monitoring stack has been installed yet.
-
-This is intentional.
-
-The existing Kubernetes platform was first validated so that any changes
-introduced by the observability stack can be compared against a known healthy
-baseline.
+The Phase 10 SLO targets are provisional internal trial objectives. They are not
+30-day performance results or customer-facing guarantees.
 
 ---
 
@@ -3072,24 +3068,728 @@ kubernetes/platform/observability/evidence/havenbridge-combined-dashboard-valida
 
 Observability Phase 8 — Incident Simulation is complete.
 
-The next HavenBridge work moves into:
+Phase 9 added independent PostgreSQL Service reachability monitoring. The
+FastAPI `/health/ready` endpoint already checks PostgreSQL with `SELECT 1`, but
+an existing pooled connection can remain usable when the PostgreSQL Service
+has no Ready backends for *new* connections. The additional EndpointSlice
+signal detects this separate failure mode. This does not mark every item in
+the broader Phase 9 application-maturity roadmap as complete.
 
-```text
-Phase 9 — Application and Operational Maturity
+---
+
+## Observability Phase 10 — Validating HTTP Request Counters
+
+### Objective
+
+Before defining HavenBridge service-level indicators (SLIs) and service-level
+objectives (SLOs), we need to establish that our application metrics accurately
+record HTTP requests.
+
+This validation deliberately generates five HTTP 404 responses and verifies
+that the Prometheus request counter increases by exactly five.
+
+The test is non-destructive. It does not modify PostgreSQL, change application
+data, restart Pods, or alter Kubernetes resources.
+
+All commands in this section run on the `syrus` workstation.
+
+### Metric Being Validated
+
+The HavenBridge FastAPI application exposes:
+
+```promql
+havenbridge_http_requests_total
 ```
 
-Phase 9 will build on the operational findings from incident simulation,
-including application readiness improvements, additional resilience testing,
-PostgreSQL backup and recovery, application expansion and further operational
-runbooks.
+This is a Prometheus Counter.
 
-The PostgreSQL connectivity incident specifically identified a future
-application improvement:
+A Counter records a cumulative quantity that normally increases over time.
+For this metric, the quantity is HTTP requests handled by the application.
 
-```text
-/health/ready
+The metric includes labels such as:
+
+- `namespace`: Kubernetes namespace.
+- `pod`: API replica that handled the request.
+- `method`: HTTP method, such as GET.
+- `route`: application route.
+- `status_code`: HTTP response status, such as 200 or 404.
+
+Each unique combination of labels produces a separate Prometheus time series.
+
+For example, requests handled by two different API Pods are recorded in
+separate series even when both Pods serve the same route.
+
+Our test uses the following PromQL expression:
+
+```promql
+sum(
+  havenbridge_http_requests_total{
+    namespace="havenbridge",
+    route="unmatched",
+    status_code="404"
+  }
+)
 ```
 
-The readiness endpoint should eventually validate critical application
-dependencies such as PostgreSQL, rather than reporting readiness based only on
-the FastAPI process being available.
+The expression selects HTTP 404 requests recorded under the `unmatched`
+route label and adds the current counter values across the matching API Pods.
+
+The `unmatched` label is used by the HavenBridge application when a request
+does not match a recognized application route.
+
+Using `sum()` is important because HavenBridge has two API replicas.
+Without aggregation, we would see separate counters for each replica rather
+than one total.
+
+### Step 1 — Capture the Baseline Counter
+
+**Host: `syrus`**
+
+```bash
+BEFORE=$(curl -sG \
+  'http://127.0.0.1:9090/api/v1/query' \
+  --data-urlencode 'query=sum(havenbridge_http_requests_total{namespace="havenbridge",route="unmatched",status_code="404"})' \
+  | jq -r '.data.result[0].value[1]')
+
+echo "Before: $BEFORE"
+```
+
+Observed result:
+
+```text
+Before: 6
+```
+
+#### Understanding the Command
+
+`BEFORE=$(...)`
+
+The `$(...)` syntax is called command substitution.
+
+It executes the command inside the parentheses and captures its standard
+output.
+
+The resulting value is assigned to the shell variable `BEFORE`.
+
+In this test, the value returned by Prometheus was `6`.
+
+The variable remains available in the current shell session.
+
+`curl`
+
+The `curl` command sends an HTTP request to the Prometheus API.
+
+`-s`
+
+Enables silent mode. This hides curl's progress meter.
+
+`-G`
+
+Tells curl to send the supplied data as URL query parameters using an HTTP
+GET request.
+
+This is appropriate because the Prometheus `/api/v1/query` endpoint accepts
+instant queries through HTTP GET.
+
+`http://127.0.0.1:9090/api/v1/query`
+
+This is the Prometheus instant-query API endpoint.
+
+In our setup, Prometheus is reachable through the existing local connection
+on `syrus`.
+
+The address `127.0.0.1` refers to the local workstation, not the Kubernetes
+Pod's IP address.
+
+`--data-urlencode`
+
+URL-encodes the supplied query parameter.
+
+This matters because PromQL contains characters such as braces, quotation
+marks, commas, and equals signs.
+
+The parameter being sent is named `query`, and its value is:
+
+```promql
+sum(
+  havenbridge_http_requests_total{
+    namespace="havenbridge",
+    route="unmatched",
+    status_code="404"
+  }
+)
+```
+
+`|`
+
+The pipe passes the output of the curl command into the next command.
+
+`jq`
+
+The `jq` utility processes JSON.
+
+Prometheus returns its API response as JSON, so `jq` allows us to extract
+only the value we need.
+
+`-r`
+
+Produces raw output instead of a JSON-encoded string.
+
+For example, it prints:
+
+```text
+6
+```
+
+rather than:
+
+```json
+"6"
+```
+
+`.data.result[0].value[1]`
+
+This is the jq expression used to extract the measurement.
+
+A typical Prometheus instant-query result contains a value array:
+
+```json
+"value": [
+  1780000000,
+  "6"
+]
+```
+
+The first element, `value[0]`, is the Unix timestamp.
+
+The second element, `value[1]`, is the metric value.
+
+`result[0]` selects the first result in the returned vector.
+
+Because our PromQL uses `sum()`, we expect one aggregated result.
+
+Finally:
+
+```bash
+echo "Before: $BEFORE"
+```
+
+prints the stored baseline.
+
+The baseline value of 6 represents the cumulative HTTP 404 requests recorded
+by the currently observed matching counter series. It is not a count of
+requests made during the current test.
+
+### Step 2 — Generate Five Intentional HTTP 404 Responses
+
+**Host: `syrus`**
+
+```bash
+for i in {1..5}; do
+  curl -sS -o /dev/null \
+    -w "Request $i: HTTP %{http_code}\n" \
+    https://havenbridge.lab/sli-test-nonexistent-route
+done
+```
+
+Observed results:
+
+```text
+Request 1: HTTP 404
+Request 2: HTTP 404
+Request 3: HTTP 404
+Request 4: HTTP 404
+Request 5: HTTP 404
+```
+
+#### Understanding the Command
+
+`for i in {1..5}; do`
+
+Starts a Bash loop that executes five times.
+
+The variable `i` takes the values 1 through 5.
+
+Each iteration sends one HTTP request.
+
+`curl -sS`
+
+The `-s` option enables silent mode.
+
+The `-S` option tells curl to display errors if the transfer fails, even
+though silent mode is enabled.
+
+This combination keeps the output clean while retaining useful connection
+error messages.
+
+`-o /dev/null`
+
+Redirects the HTTP response body to `/dev/null`.
+
+We do not need the JSON response body for this test.
+
+We only need the HTTP status code.
+
+`-w`
+
+Specifies a custom output format.
+
+Our format is:
+
+```text
+Request $i: HTTP %{http_code}\n
+```
+
+`$i` displays the current loop number.
+
+`%{http_code}` is a curl variable containing the HTTP response status code.
+
+`\n` adds a newline after each result.
+
+`https://havenbridge.lab/sli-test-nonexistent-route`
+
+This is an intentionally nonexistent application URL.
+
+HavenBridge receives the request and responds with HTTP 404 because no
+matching route exists.
+
+The request is still processed by the FastAPI application and recorded by
+its HTTP request counter.
+
+`done`
+
+Ends the Bash loop.
+
+#### Why Use HTTP 404?
+
+HTTP 404 provides a safe way to test status-code-specific metrics.
+
+It demonstrates that the application records responses other than HTTP 200
+without deliberately crashing an API process or interrupting PostgreSQL.
+
+An HTTP 404 is not an HTTP 5xx server error.
+
+A nonexistent route also does not, by itself, prove that the service is
+unavailable.
+
+For our strict HTTP 2xx request-success SLI, however, an HTTP 404 is
+classified as an unsuccessful request.
+
+The definition of success must be selected deliberately when designing the
+final HavenBridge availability SLO.
+
+### Step 3 — Allow Prometheus to Scrape the Updated Counters
+
+**Host: `syrus`**
+
+```bash
+sleep 45
+```
+
+`sleep` pauses the shell for the specified number of seconds.
+
+We wait 45 seconds to give Prometheus time to scrape the API's `/metrics`
+endpoint and observe the updated counter values.
+
+The exact wait required depends on the configured Prometheus scrape interval
+and the time of the most recent scrape.
+
+Waiting does not create requests or change metric values. It simply allows
+time for the metrics pipeline to collect the requests already generated.
+
+### Step 4 — Capture the Updated Counter and Calculate the Difference
+
+**Host: `syrus`**
+
+```bash
+AFTER=$(curl -sG \
+  'http://127.0.0.1:9090/api/v1/query' \
+  --data-urlencode 'query=sum(havenbridge_http_requests_total{namespace="havenbridge",route="unmatched",status_code="404"})' \
+  | jq -r '.data.result[0].value[1]')
+
+echo "Before: $BEFORE"
+echo "After:  $AFTER"
+
+awk -v before="$BEFORE" -v after="$AFTER" \
+  'BEGIN { printf "New 404 requests: %.0f\n", after-before }'
+```
+
+Observed results:
+
+```text
+Before: 6
+After:  11
+New 404 requests: 5
+```
+
+#### Understanding the Command
+
+`AFTER=$(...)`
+
+Runs the same Prometheus query used for the baseline and stores the updated
+value in a new shell variable named `AFTER`.
+
+Using exactly the same query before and after the test ensures that we compare
+the same metric and label selection.
+
+The updated value was:
+
+```text
+11
+```
+
+`echo "Before: $BEFORE"`
+
+Prints the original value stored in the `BEFORE` variable.
+
+`echo "After:  $AFTER"`
+
+Prints the new value stored in the `AFTER` variable.
+
+`awk`
+
+AWK is a text-processing language that can also perform numerical
+calculations.
+
+We use it here to calculate the difference between the two counter values.
+
+`-v before="$BEFORE"`
+
+Passes the shell variable `BEFORE` into AWK as a variable named `before`.
+
+`-v after="$AFTER"`
+
+Passes the shell variable `AFTER` into AWK as a variable named `after`.
+
+`BEGIN`
+
+Runs the AWK action before processing any input records.
+
+Since this calculation does not require an input file, the `BEGIN` block is
+sufficient.
+
+`printf`
+
+Prints a formatted result.
+
+Our format is:
+
+```text
+New 404 requests: %.0f\n
+```
+
+`%.0f` displays the numerical result as a floating-point number with zero
+decimal places.
+
+`\n` adds a newline.
+
+`after-before`
+
+Subtracts the baseline counter from the updated counter.
+
+The observed calculation was:
+
+```text
+11 - 6 = 5
+```
+
+Therefore:
+
+```text
+New 404 requests: 5
+```
+
+This matches the five HTTP 404 responses generated by the Bash loop.
+
+### Validation Result
+
+| Validation | Observed result |
+|---|---|
+| Baseline HTTP 404 counter | 6 |
+| Deliberate HTTP 404 requests | 5 |
+| Updated HTTP 404 counter | 11 |
+| Counter difference | 5 |
+| Expected counter difference | 5 |
+| Result | PASS |
+
+This confirms that the matching Prometheus counters captured all five
+intentional HTTP 404 requests in this controlled test.
+
+The calculation assumes that no unrelated matching requests occurred during
+the test and that the API counter series did not reset between the baseline
+and final measurements.
+
+For an isolated test with stable API replicas, subtracting the two observed
+cumulative values provides a useful validation of the request counter.
+
+### Why This Differs From `increase()`
+
+Earlier in Phase 10, we evaluated:
+
+```promql
+sum(
+  increase(
+    havenbridge_http_requests_total{
+      namespace="havenbridge",
+      route!~"/health/(live|ready)|/metrics"
+    }[5m]
+  )
+)
+```
+
+The `increase()` function estimates how much a counter increased over a
+specified time window.
+
+It works from the samples that Prometheus collected and extrapolates around
+the window boundaries.
+
+Consequently, it may return fractional values.
+
+For example, an earlier test returned approximately:
+
+```text
+HTTP 200: 22.2222
+HTTP 404: 3.3333
+```
+
+even though the test deliberately generated 20 successful requests and five
+HTTP 404 responses.
+
+A possible contributing factor is that Prometheus first observed one of the
+HTTP 404 counter series after some requests had already occurred.
+
+The historical samples would need to be examined to establish the precise
+cause of that earlier difference.
+
+The cumulative-counter comparison performed in this section answers:
+
+```text
+How much did the currently observed matching counters change
+between these two measurements?
+```
+
+The `increase()` function answers:
+
+```text
+How much does Prometheus estimate that the counters increased
+during the specified time window?
+```
+
+These are related measurements but are not identical.
+
+We will use Prometheus range functions for ongoing SLI calculations while
+using controlled before-and-after counter comparisons to validate our
+instrumentation.
+
+### Important Limitation
+
+The cumulative-counter comparison should not be treated as a general-purpose
+long-term request accounting method.
+
+Application counter values normally reset when a process restarts.
+
+A simple subtraction can therefore produce misleading results if an API Pod
+restarts or a matching time series disappears during the measurement.
+
+For longer reliability measurements, Prometheus counter functions such as
+`increase()` and `rate()` are designed to handle observed counter resets.
+
+The initial observation of newly created time series still requires care,
+because Prometheus cannot reconstruct requests that occurred before the first
+sample it collected.
+
+### Phase 10 Conclusion
+
+This controlled test established that:
+
+1. HavenBridge records HTTP 404 responses through
+   `havenbridge_http_requests_total`.
+
+2. The `unmatched` route label identifies requests that do not match a
+   recognized application route.
+
+3. Prometheus aggregates matching request counters across the two API
+   replicas.
+
+4. The metric increased from 6 to 11 after five intentional HTTP 404 requests.
+
+5. The calculated counter difference matched the number of generated
+   requests exactly.
+
+6. Strict HTTP 2xx request success and HTTP 5xx service reliability are
+   different measurements.
+
+The HTTP request counter is now validated for this controlled scenario.
+
+**Phase 10 HTTP 404 Counter Validation: PASS**
+---
+
+## Observability Phase 10 — SLI and SLO Foundation
+
+### Why HavenBridge needs SLIs and SLOs
+
+A Kubernetes Pod can be Running and Ready while a user still cannot complete an
+application operation. Conversely, a deliberate request to an invalid URL can
+return HTTP 404 even when the API is operating correctly. We therefore need
+explicit measurements and targets instead of equating Pod health, every HTTP
+response code, and user-visible reliability.
+
+- **SLI — Service Level Indicator:** A measured proportion or quantity describing
+  actual service behavior over a stated window. For example, the percentage of
+  valid inquiry-retrieval requests that receive HTTP 2xx responses. The SLI
+  answers, "What happened?"
+- **SLO — Service Level Objective:** A target for an SLI over a defined period.
+  For example, a 99% request-success SLO over a rolling 30 days means the
+  measured success proportion is intended to be at least 99% over that window.
+  The SLO answers, "What level of service are we aiming for?"
+- **Error budget:** The portion of eligible requests that may fail while still
+  meeting an SLO. A 99% SLO permits up to 1% failures; a 99.5% SLO permits up to
+  0.5%. The budget helps decide when to investigate reliability issues or slow
+  down changes. It does not imply that failures are desirable or that a
+  particular number of failures is guaranteed.
+
+An SLO is an internal engineering objective, **not** a contractual SLA (Service
+Level Agreement). HavenBridge has not established an external SLA.
+
+### Two candidate SLIs and their boundaries
+
+| SLI | Eligible requests | Successful result | HTTP 404 treatment |
+|---|---|---|---|
+| Inquiry-retrieval success | Instrumented `GET /api/v1/inquiries` requests handled by FastAPI | HTTP 2xx | Unsuccessful **if** returned for this valid operation |
+| API server-error-free requests | Instrumented application requests handled by FastAPI, excluding `/health/live`, `/health/ready`, and `/metrics` | Any response other than HTTP 5xx | Counts as server-error-free; not necessarily a successful user task |
+
+These are different indicators. An invalid URL returning 404 lowers a strict
+all-requests HTTP 2xx percentage, but does not demonstrate that the service is
+down. The second SLI measures **responses handled by FastAPI without a 5xx**, not
+complete end-to-end availability. For example, an HTTP 503 produced by Traefik
+before a request reaches FastAPI is absent from this application counter. A
+future external probe or suitable ingress metrics are needed to measure that
+path; no end-to-end availability claim is made here.
+
+### Initial 24-hour traffic inventory
+
+**Host: `syrus` — Inquiry retrieval grouped by response status**
+
+```bash
+curl -sG \
+  'http://127.0.0.1:9090/api/v1/query' \
+  --data-urlencode 'query=sum by (status_code) (increase(havenbridge_http_requests_total{namespace="havenbridge",method="GET",route="/api/v1/inquiries"}[24h]))' \
+  | jq -r '
+    .data.result[]
+    | "HTTP \(.metric.status_code): \(.value[1])"
+  '
+```
+
+Observed:
+
+```text
+HTTP 200: 20.006946856547412
+```
+
+**Host: `syrus` — All non-health-check application requests by status**
+
+```bash
+curl -sG \
+  'http://127.0.0.1:9090/api/v1/query' \
+  --data-urlencode 'query=sum by (status_code) (increase(havenbridge_http_requests_total{namespace="havenbridge",route!~"/health/(live|ready)|/metrics"}[24h]))' \
+  | jq -r '
+    .data.result[]
+    | "HTTP \(.metric.status_code): \(.value[1])"
+  '
+```
+
+Observed:
+
+```text
+HTTP 200: 20.006946856547412
+HTTP 404: 8.003224486076551
+```
+
+The HTTP 404 traffic includes deliberate monitoring tests and is not proof of
+API unavailability. No HTTP 5xx series appeared in this query. The values are
+estimates because Prometheus `increase()` extrapolates the observed counter
+samples to the specified window; fractions do not indicate partial HTTP
+requests. The low volume is largely controlled synthetic traffic and should
+not be presented as representative production-user reliability.
+
+### SLI 1 — Inquiry-retrieval success
+
+**Definition:** Percentage of instrumented `GET /api/v1/inquiries` requests
+that return an HTTP 2xx response in the last 24 hours.
+
+```text
+Inquiry-retrieval success SLI =
+  (HTTP 2xx GET /api/v1/inquiries requests / all GET /api/v1/inquiries requests)
+  × 100
+```
+
+**Host: `syrus` — Query the SLI**
+
+```bash
+curl -sG \
+  'http://127.0.0.1:9090/api/v1/query' \
+  --data-urlencode 'query=100 * sum(increase(havenbridge_http_requests_total{namespace="havenbridge",method="GET",route="/api/v1/inquiries",status_code=~"2.."}[24h])) / sum(increase(havenbridge_http_requests_total{namespace="havenbridge",method="GET",route="/api/v1/inquiries"}[24h]))' \
+  | jq -r '.data.result[0].value[1]'
+```
+
+Observed result: **100%**. The `method` and `route` filters isolate this
+specific operation; `status_code=~"2.."` selects HTTP 2xx responses; and
+`increase(...[24h])` estimates the counter increases over 24 hours. The ratio
+is converted to a percentage by multiplying by 100. About 20 observed
+requests is sufficient to validate the query, **not** a long-term reliability
+claim.
+
+### SLI 2 — API server-error-free requests
+
+**Definition:** Percentage of instrumented non-health-check requests handled
+by FastAPI that do not return HTTP 5xx during the last 24 hours.
+
+```text
+API server-error-free SLI =
+  (application requests without HTTP 5xx / all instrumented application requests)
+  × 100
+```
+
+**Host: `syrus` — Query the SLI**
+
+```bash
+curl -sG \
+  'http://127.0.0.1:9090/api/v1/query' \
+  --data-urlencode 'query=100 * sum(increase(havenbridge_http_requests_total{namespace="havenbridge",route!~"/health/(live|ready)|/metrics",status_code!~"5.."}[24h])) / sum(increase(havenbridge_http_requests_total{namespace="havenbridge",route!~"/health/(live|ready)|/metrics"}[24h]))' \
+  | jq -r '.data.result[0].value[1]'
+```
+
+Observed result: **100%**. `route!~` excludes the Kubernetes liveness and
+readiness probes and the metrics endpoint; `status_code!~"5.."` includes
+responses other than HTTP 5xx. In particular, the intentional HTTP 404s do
+**not** lower this indicator. This measurement only covers requests recorded
+by FastAPI, and it does not verify whether each request fulfilled the user's
+intent.
+
+### No-traffic behavior and low-sample caveat
+
+If the eligible request denominator is zero, the ratio may return `NaN` (0/0)
+or no result. Display **NO TRAFFIC / INSUFFICIENT DATA**, not 0% or 100%.
+Likewise, a 100% result from approximately 20 synthetic requests is a useful
+instrumentation check but a small sample for judging reliability. Record the
+request volume alongside any displayed percentage.
+
+### Provisional 30-day SLOs for the homelab trial
+
+| Candidate SLI | Provisional rolling 30-day target | Error budget |
+|---|---:|---|
+| Inquiry-retrieval success | At least 99% | At most 1% of eligible inquiry-retrieval requests unsuccessful |
+| API server-error-free requests | At least 99.5% | At most 0.5% of eligible instrumented application requests return HTTP 5xx |
+
+These targets are **provisional internal trial objectives**, selected for
+learning and validation rather than inferred from the small 24-hour sample.
+They are not achieved 30-day results, availability guarantees, or customer
+commitments. For example, at 200 eligible requests, a 99.5% target allows no
+more than one failure; the actual allowed integer count depends on traffic
+volume and the defined window. The 30-day evaluation cannot be validated from
+one day of test traffic. Before declaring a mature SLO, assess traffic volume,
+future frontend usage, and coverage of failures before FastAPI.
+
+**Phase 10 SLI formula validation: PASS — both observed 24-hour SLIs returned
+100%, with low synthetic traffic and limited FastAPI-only scope. SLO targets:
+PROVISIONAL; 30-day compliance: NOT YET MEASURED.**
