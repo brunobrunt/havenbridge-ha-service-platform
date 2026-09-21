@@ -144,6 +144,91 @@ Search, filtering, pagination, and invalid-form scenarios are implemented
 but require separate recorded interaction checks before being marked PASS
 in this validation history.
 
+## Frontend Phase 3 — Interaction and Usability Validation
+
+### Objective
+
+Validate the local HavenBridge inquiry workspace through browser interactions
+before connecting it to the live FastAPI backend.
+
+All tests used the local Vite development server on `syrus`:
+
+`http://127.0.0.1:5173/`
+
+The prototype continued to use fictional, in-memory records. No PostgreSQL,
+Kubernetes, Traefik, or backend changes were made during this phase.
+
+### Inquiry List Validation
+
+| Test | Observed result | Status |
+|---|---|---|
+| Search for `grace` | Only Grace Sample appeared | PASS |
+| Filter by Respite Care | Grace Sample and Amara Sample appeared | PASS |
+| Filter by New | Four matching records appeared after a demo inquiry was created | PASS |
+| Pagination, page 1 | Six of eight initial inquiries appeared | PASS |
+| Pagination, page 2 | Remaining two inquiries appeared | PASS |
+| Pagination controls | Previous and Next were disabled at the appropriate ends | PASS |
+
+Search and filtering operate on records already loaded into the local
+prototype. These tests do not establish database-wide search or filtering.
+
+### Inquiry Creation and Temporary State
+
+Creating a demo inquiry displayed confirmation and added `HB-0009` to the
+workspace. The total inquiry count increased from eight to nine, and the New
+count increased from three to four.
+
+An earlier status-change test displayed Grace Sample as Reviewing. Refreshing
+the browser restored the original eight records, removed `HB-0009`, and
+returned Grace Sample to New.
+
+**Result: PASS — demo creation and status changes affect browser memory only.**
+
+The prototype does not send these changes to FastAPI or PostgreSQL and does
+not create a database status-history record.
+
+### Form Validation
+
+| Test | Observed result | Status |
+|---|---|---|
+| Required field left empty | Browser displayed a required-field message and blocked submission | PASS |
+| Email entered as `not-an-email` | Browser reported a missing `@` and blocked submission | PASS |
+| Seven-character message | Browser required at least 10 characters and blocked submission | PASS |
+| One-character requester name | Not separately tested | PENDING |
+
+These checks validate the browser form behavior exercised during testing.
+They do not replace server-side validation when a live API connection is
+introduced.
+
+### Narrow-Screen Layout
+
+Chrome DevTools Device Mode was used to inspect the frontend at a responsive
+viewport width of **343 px**.
+
+The overview cards stacked vertically. The inquiry-list controls adapted to
+the narrow layout. On the New inquiry screen, all four form fields and both
+action buttons were visible within the viewport width, without visible
+horizontal overflow.
+
+**Result: PASS for the inspected 343 px layout.**
+
+This was a browser viewport inspection, not a test on a physical mobile device.
+
+### Validation Summary
+
+The observed search, category filtering, status filtering, pagination,
+demo creation, refresh reset, required-field validation, email-format
+validation, minimum-message-length validation, and narrow-screen layout
+checks passed.
+
+A one-character requester-name test and broader accessibility testing remain
+outstanding. The frontend remains a local, unauthenticated prototype using
+fictional data; it is not ready to expose real inquiry information.
+
+**Frontend Phase 3 observed interaction validation: PASS, with the
+outstanding checks noted above.**
+
+
 ## Next Steps
 
 1. Complete and record the remaining frontend interaction checks.
