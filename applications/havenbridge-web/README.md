@@ -200,7 +200,7 @@ not create a database status-history record.
 | Required field left empty | Browser displayed a required-field message and blocked submission | PASS |
 | Email entered as `not-an-email` | Browser reported a missing `@` and blocked submission | PASS |
 | Seven-character message | Browser required at least 10 characters and blocked submission | PASS |
-| One-character requester name | Not separately tested | PENDING |
+| One-character requester name | Not separately tested in Phase 3; verified in Phase 5 below | DEFERRED |
 
 These checks validate the browser form behavior exercised during testing.
 They do not replace server-side validation when a live API connection is
@@ -227,9 +227,10 @@ demo creation, refresh reset, required-field validation, email-format
 validation, minimum-message-length validation, and narrow-screen layout
 checks passed.
 
-A one-character requester-name test and broader accessibility testing remain
-outstanding. The frontend remains a local, unauthenticated prototype using
-fictional data; it is not ready to expose real inquiry information.
+At the end of Phase 3, the one-character requester-name test and broader
+accessibility testing remained outstanding; the name case was subsequently
+verified in Phase 5. The frontend remains a local, unauthenticated prototype
+using fictional data; it is not ready to expose real inquiry information.
 
 **Frontend Phase 3 observed interaction validation: PASS, with the
 outstanding checks noted above.**
@@ -297,14 +298,15 @@ Observed after replacing `App.tsx` and adding the mock service:
 | Create fictional inquiry | `HB-0009` appeared; total became 9 and New became 4 | PASS |
 | Change `HB-0005` status | `HB-0005` showed Referred; New changed 4 → 3 and Referred changed 2 → 3 while total stayed 9 | PASS |
 | Refresh browser | Total returned to 8; `HB-0009` disappeared; `HB-0005` returned to New | PASS |
-| Loading and load-error screens | Present in code, not independently exercised or timed in browser | NOT YET VERIFIED |
+| Loading and load-error screens | Not independently exercised in Phase 4; subsequently observed in Phase 5 | DEFERRED TO PHASE 5 |
 | Service failure handling for create/status updates | Present in code, not independently simulated | NOT YET VERIFIED |
 
 Browser screenshots were reviewed for creation, status change, and the
 refresh reset. No automated unit or integration tests were run in this phase.
 
 **Result: PASS for the observed build, lint, creation, status-update, and
-refresh-reset checks.** Loading/error behavior remains to be verified.
+refresh-reset checks.** Loading/error behavior was subsequently exercised in
+Phase 5.
 
 ### Remaining Boundaries
 
@@ -313,17 +315,101 @@ asynchronous behavior are not substitutes for server-side validation,
 authentication, authorization, audit logging, secure storage, or live API
 integration. Continue using fictional names and `example.org` addresses.
 
+## Frontend Phase 5 — Loading, Error, and Accessibility Validation
+
+### Objective and Scope
+
+Exercise the frontend's browser-based input checks, keyboard navigation, and
+loading/load-error displays without connecting to FastAPI or PostgreSQL.
+The service, backend, Kubernetes resources, and Traefik routing were not
+changed. All test records were fictional.
+
+### Browser Interaction Checks
+
+| Check | Evidence and observed result | Status |
+|---|---|---|
+| One-character requester name | A name of `A` triggered the browser's minimum-two-character message and prevented submission | PASS |
+| Keyboard navigation | User confirmed Tab could reach navigation, all four form fields, Cancel, and Create demo inquiry, with visible keyboard focus; a focused inquiry row was also visible in a screenshot | PASS for the reported keyboard path |
+| Loading display | A controlled mock-service delay showed “Loading fictional inquiries…” and identified the operation as a local demonstration | PASS for display appearing |
+| Load-error display | A controlled mock-service failure showed “Unable to load the demo” and “Intentional mock loading error for Phase 5 validation.” | PASS for display appearing |
+
+The screenshots establish that the loading and error messages rendered. They
+do **not** independently establish the precise loading duration or a successful
+eight-record transition after the delay. Keyboard activation with Enter, a
+screen-reader review, automated accessibility testing, and full WCAG
+conformance were not verified.
+
+### Controlled Loading and Failure Test
+
+**Host: `syrus` — temporary local test only**
+
+A temporary test version of
+`applications/havenbridge-web/src/services/mockInquiryService.ts` accepted
+`hbMockTest` query-string switches solely to make these states observable.
+The test file was **not committed**. The locally committed mock service has no
+Phase 5 query-string test switches.
+
+The temporary service was installed only after backing up the original to
+`/tmp/havenbridge-mockInquiryService-before-phase5.ts`. The temporary build
+(`npm run build`) passed, and `npm run lint` reported zero warnings and zero
+errors. Vite must be running for a browser to access its local URL; a prior
+`ERR_CONNECTION_REFUSED` screenshot occurred when the development server was
+not running and was **not** an application load-error test.
+
+The browser test URLs were:
+
+```text
+http://127.0.0.1:5173/?hbMockTest=loading
+http://127.0.0.1:5173/?hbMockTest=error
+```
+
+The loading URL displayed the loading message. The error URL displayed the
+intentional mock failure message. The error URL is deliberately configured to
+fail again on refresh while the temporary test file is installed; remove the
+test switch to return to normal behavior.
+
+**Host: `syrus` — restore the original service and validate**
+
+```bash
+cd /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-web
+
+# Restore the original service; do not commit the temporary test implementation.
+cp /tmp/havenbridge-mockInquiryService-before-phase5.ts \
+  src/services/mockInquiryService.ts
+
+npm run build
+npm run lint
+git status --short
+```
+
+The restored production build passed, Oxlint reported **0 warnings and 0
+errors**, and `git status --short` produced no output. This confirms the
+original mock service was restored with no uncommitted changes at the end of
+the browser tests.
+
+### Result and Remaining Coverage
+
+**PASS for the observed one-character name rejection, reported keyboard
+navigation path, controlled loading display, controlled load-error display,
+and restoration of the original service.** These are targeted checks, not a
+complete accessibility audit or end-to-end test suite. The handling of failures
+during inquiry creation and status updates has not been separately simulated.
+
 ## Next Steps
 
-1. Exercise and record the new loading/error states and the outstanding
-   one-character requester-name case; review accessibility.
-2. Review the first-release screen design and distinguish the future API
-   client contract from the current mock-service functions.
-3. Design and validate staff authentication and API authorization **before**
-   connecting a deployed management interface to inquiry data.
+1. Review the first-release screen design and perform broader accessibility
+   testing, including keyboard activation, screen-reader behavior, and focus
+   management; these remain unverified.
+2. Separately simulate and validate failures during inquiry creation and
+   status updates; Phase 5 verified only the initial-load error display.
+3. Define the future API client contract and design and validate staff
+   authentication and API authorization **before** exposing real inquiries.
 4. Connect the frontend to the existing FastAPI contract in a later phase,
    with appropriate server-side validation and error handling.
 5. Review the Traefik routing plan before deploying the frontend.
+6. Near project completion, compile the alphabetical HavenBridge glossary and
+   host-labeled command reference into a searchable PDF, using validated
+   repository documentation and runbooks without including secrets.
 
 The existing FastAPI backend, PostgreSQL database, and Kubernetes routing
 remain unchanged during this prototype phase.
