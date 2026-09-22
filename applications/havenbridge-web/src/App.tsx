@@ -1,15 +1,21 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   DEMO_CATEGORIES,
-  DEMO_INQUIRIES,
   INQUIRY_STATUSES,
   STATUS_LABELS,
   type Inquiry,
   type InquiryStatus,
 } from "./demoData";
+import {
+  createMockInquiry,
+  listMockInquiries,
+  updateMockInquiryStatus,
+  type CreateInquiryInput,
+} from "./services/mockInquiryService";
 import "./App.css";
 
 type Page = "overview" | "inquiries" | "new";
+type NoticeKind = "success" | "error";
 
 const PAGE_SIZE = 6;
 
@@ -25,8 +31,16 @@ function inquiryNumber(id: number): string {
   return `HB-${String(id).padStart(4, "0")}`;
 }
 
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
+
 function App() {
-  const [inquiries, setInquiries] = useState<Inquiry[]>(DEMO_INQUIRIES);
+  const [inquiries, setInquiries] = useState<Inquiry[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+
   const [page, setPage] = useState<Page>("overview");
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [statusDraft, setStatusDraft] = useState<InquiryStatus>("new");
@@ -35,6 +49,34 @@ function App() {
   const [search, setSearch] = useState("");
   const [pageNumber, setPageNumber] = useState(1);
   const [notice, setNotice] = useState("");
+  const [noticeKind, setNoticeKind] = useState<NoticeKind>("success");
+
+  // Fetches fictional records from local module memory; no network request.
+  useEffect(() => {
+    let cancelled = false;
+
+    listMockInquiries()
+      .then((records) => {
+        if (!cancelled) {
+          setInquiries(records);
+          setLoadError(null);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setLoadError(errorMessage(error, "Unable to load fictional inquiries."));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const selectedInquiry = inquiries.find((item) => item.id === selectedId);
 
@@ -63,20 +105,21 @@ function App() {
       );
   }, [inquiries, statusFilter, categoryFilter, search]);
 
-  const totalPages = Math.max(
-    1,
-    Math.ceil(filteredInquiries.length / PAGE_SIZE),
-  );
-
+  const totalPages = Math.max(1, Math.ceil(filteredInquiries.length / PAGE_SIZE));
   const visibleInquiries = filteredInquiries.slice(
     (pageNumber - 1) * PAGE_SIZE,
     pageNumber * PAGE_SIZE,
   );
 
+  function clearNotice() {
+    setNotice("");
+    setNoticeKind("success");
+  }
+
   function showOverview() {
     setPage("overview");
     setSelectedId(null);
-    setNotice("");
+    clearNotice();
   }
 
   function showInquiries(filter: InquiryStatus | "all" = "all") {
@@ -86,72 +129,92 @@ function App() {
     setCategoryFilter("all");
     setSearch("");
     setPageNumber(1);
-    setNotice("");
+    clearNotice();
   }
 
   function openInquiry(inquiry: Inquiry) {
     setSelectedId(inquiry.id);
     setStatusDraft(inquiry.status);
     setPage("inquiries");
-    setNotice("");
+    clearNotice();
   }
 
-  function updateStatus() {
-    if (!selectedInquiry || statusDraft === selectedInquiry.status) return;
-
-    const now = new Date().toISOString();
-
-    setInquiries((current) =>
-      current.map((item) =>
-        item.id === selectedInquiry.id
-          ? { ...item, status: statusDraft, updated_at: now }
-          : item,
-      ),
-    );
-
-    setNotice("Demo status updated in this browser session only.");
-  }
-
-  function createInquiry(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    const data = new FormData(event.currentTarget);
-    const requester_name = String(data.get("requester_name") ?? "").trim();
-    const requester_email = String(data.get("requester_email") ?? "").trim();
-    const service_category = String(data.get("service_category") ?? "");
-    const message = String(data.get("message") ?? "").trim();
-
-    if (
-      requester_name.length < 2 ||
-      requester_name.length > 120 ||
-      !requester_email.includes("@") ||
-      !DEMO_CATEGORIES.includes(service_category) ||
-      message.length < 10 ||
-      message.length > 2000
-    ) {
-      setNotice("Please check the form fields and try again.");
+  async function updateStatus() {
+    if (!selectedInquiry || isSaving || statusDraft === selectedInquiry.status) {
       return;
     }
 
-    const id = Math.max(0, ...inquiries.map((item) => item.id)) + 1;
-    const now = new Date().toISOString();
+    setIsSaving(true);
+    clearNotice();
 
-    const inquiry: Inquiry = {
-      id,
-      requester_name,
-      requester_email,
-      service_category,
-      message,
-      status: "new",
-      created_at: now,
-      updated_at: now,
+    try {
+      const updated = await updateMockInquiryStatus(selectedInquiry.id, statusDraft);
+      setInquiries((current) =>
+        current.map((item) => (item.id === updated.id ? updated : item)),
+      );
+      setNoticeKind("success");
+      setNotice("Demo status updated in this browser session only.");
+    } catch (error: unknown) {
+      setNoticeKind("error");
+      setNotice(errorMessage(error, "Unable to update the demo status."));
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function createInquiry(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (isSaving) return;
+
+    // Read the form before awaiting the asynchronous mock operation.
+    const data = new FormData(event.currentTarget);
+    const input: CreateInquiryInput = {
+      requester_name: String(data.get("requester_name") ?? "").trim(),
+      requester_email: String(data.get("requester_email") ?? "").trim(),
+      service_category: String(data.get("service_category") ?? "").trim(),
+      message: String(data.get("message") ?? "").trim(),
     };
 
-    setInquiries((current) => [inquiry, ...current]);
-    setSelectedId(id);
-    setStatusDraft("new");
-    setPage("inquiries");
-    setNotice("Fictional inquiry created in this browser session only.");
+    setIsSaving(true);
+    clearNotice();
+
+    try {
+      const created = await createMockInquiry(input);
+      setInquiries((current) => [created, ...current]);
+      setSelectedId(created.id);
+      setStatusDraft(created.status);
+      setStatusFilter("all");
+      setCategoryFilter("all");
+      setSearch("");
+      setPageNumber(1);
+      setPage("inquiries");
+      setNoticeKind("success");
+      setNotice("Fictional inquiry created in this browser session only.");
+    } catch (error: unknown) {
+      setNoticeKind("error");
+      setNotice(errorMessage(error, "Unable to create the demo inquiry."));
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  if (isLoading) {
+    return (
+      <main className="main-content" role="status">
+        <h1>Loading fictional inquiries…</h1>
+        <p className="muted">This is a local demonstration, not a live API request.</p>
+      </main>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <main className="main-content" role="alert">
+        <h1>Unable to load the demo</h1>
+        <p>{loadError}</p>
+        <p>Refresh the page to try again.</p>
+      </main>
+    );
   }
 
   return (
@@ -183,7 +246,7 @@ function App() {
             onClick={() => {
               setSelectedId(null);
               setPage("new");
-              setNotice("");
+              clearNotice();
             }}
           >
             New inquiry
@@ -223,7 +286,15 @@ function App() {
         </div>
 
         {notice && (
-          <div className="notice" role="status">
+          <div
+            className="notice"
+            role={noticeKind === "error" ? "alert" : "status"}
+            style={
+              noticeKind === "error"
+                ? { background: "#fee2e2", color: "#991b1b" }
+                : undefined
+            }
+          >
             {notice}
           </div>
         )}
@@ -324,9 +395,7 @@ function App() {
                 <select
                   value={statusFilter}
                   onChange={(event) => {
-                    setStatusFilter(
-                      event.target.value as InquiryStatus | "all",
-                    );
+                    setStatusFilter(event.target.value as InquiryStatus | "all");
                     setPageNumber(1);
                   }}
                 >
@@ -359,9 +428,7 @@ function App() {
             </div>
 
             {visibleInquiries.length === 0 ? (
-              <div className="empty-state">
-                No inquiries match these filters.
-              </div>
+              <div className="empty-state">No inquiries match these filters.</div>
             ) : (
               <div className="inquiry-list">
                 {visibleInquiries.map((item) => (
@@ -407,15 +474,16 @@ function App() {
 
         {page === "inquiries" && selectedInquiry && (
           <section className="panel detail-panel">
-            <button className="text-button" onClick={() => showInquiries(statusFilter)}>
+            <button
+              className="text-button"
+              onClick={() => showInquiries(statusFilter)}
+            >
               ← Back to inquiries
             </button>
 
             <div className="section-heading">
               <div>
-                <span className="eyebrow">
-                  {inquiryNumber(selectedInquiry.id)}
-                </span>
+                <span className="eyebrow">{inquiryNumber(selectedInquiry.id)}</span>
                 <h2>{selectedInquiry.service_category}</h2>
               </div>
               <span className={`status status-${selectedInquiry.status}`}>
@@ -452,6 +520,7 @@ function App() {
                 Update status
                 <select
                   value={statusDraft}
+                  disabled={isSaving}
                   onChange={(event) =>
                     setStatusDraft(event.target.value as InquiryStatus)
                   }
@@ -465,10 +534,10 @@ function App() {
               </label>
               <button
                 className="primary-button"
-                disabled={statusDraft === selectedInquiry.status}
+                disabled={isSaving || statusDraft === selectedInquiry.status}
                 onClick={updateStatus}
               >
-                Save demo status
+                {isSaving ? "Saving…" : "Save demo status"}
               </button>
             </div>
 
@@ -538,12 +607,17 @@ function App() {
                 <button
                   type="button"
                   className="secondary-button"
+                  disabled={isSaving}
                   onClick={showOverview}
                 >
                   Cancel
                 </button>
-                <button type="submit" className="primary-button">
-                  Create demo inquiry
+                <button
+                  type="submit"
+                  className="primary-button"
+                  disabled={isSaving}
+                >
+                  {isSaving ? "Creating…" : "Create demo inquiry"}
                 </button>
               </div>
             </form>

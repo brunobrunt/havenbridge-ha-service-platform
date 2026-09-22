@@ -1,4 +1,3 @@
-
 # HavenBridge Web — Local Frontend Prototype
 
 ## Purpose
@@ -55,21 +54,28 @@ The supported statuses match the existing backend contract:
 
 ### Main Files
 
+The table below describes the current frontend structure, including the
+mock-service separation added in Phase 4.
+
 | File | Purpose |
 |---|---|
-| `src/demoData.ts` | Defines the inquiry types, statuses, service categories, and eight initial fictional records |
-| `src/App.tsx` | Implements navigation, screens, filters, forms, and temporary React state |
+| `src/demoData.ts` | Defines inquiry types, statuses, service categories, and eight initial fictional records |
+| `src/services/mockInquiryService.ts` | Owns temporary fictional records and provides asynchronous list, get, create, and status-update operations |
+| `src/App.tsx` | Implements navigation, screens, filters, forms, loading/error states, and React state; calls the mock service for inquiry operations |
 | `src/App.css` | Styles the workspace and its responsive layout |
 | `src/index.css` | Provides application-wide styles |
 | `src/main.tsx` | Mounts the React application using the Vite scaffold |
 
 ### Data and Privacy Boundaries
 
-The prototype initializes its records from `DEMO_INQUIRIES` in
-`src/demoData.ts`.
+Phase 2 originally loaded `DEMO_INQUIRIES` directly into React state. Since
+Phase 4, `src/services/mockInquiryService.ts` copies those same initial
+records into module-level browser memory; `App.tsx` loads them through the
+service and holds a copy in React state for display.
 
-Creating an inquiry or changing a status updates React state in the running
-browser session only. A page refresh restores the original demo records.
+Creating an inquiry or changing a status updates the mock service and the
+React display in the running browser session only. A full page refresh
+restores the original demo records.
 
 The interface does not:
 
@@ -114,15 +120,16 @@ npm run build
 npm run lint
 ```
 
-Observed results:
+Observed results through Phase 4:
 
-- Production build: **PASS**
+- Production build: **PASS** (`tsc -b && vite build`)
 - Oxlint: **0 warnings, 0 errors**
 - `node_modules` and `dist` are ignored by Git.
 
 `npm run build` compiles the TypeScript application and produces the frontend
 build output in `dist/`. `npm run lint` checks the source code for issues
-covered by the configured linter.
+covered by the configured linter. These checks do not replace browser
+interaction tests.
 
 ## Interactive Validation Evidence
 
@@ -140,9 +147,8 @@ The following behavior was observed during Frontend Phase 2:
 **Result: PASS for the observed create, status-change, and refresh-reset
 scenarios.**
 
-Search, filtering, pagination, and invalid-form scenarios are implemented
-but require separate recorded interaction checks before being marked PASS
-in this validation history.
+Search, filtering, pagination, and invalid-form scenarios were subsequently
+tested and recorded in Phase 3 below.
 
 ## Frontend Phase 3 — Interaction and Usability Validation
 
@@ -228,14 +234,95 @@ fictional data; it is not ready to expose real inquiry information.
 **Frontend Phase 3 observed interaction validation: PASS, with the
 outstanding checks noted above.**
 
+## Frontend Phase 4 — Mock Service and Future API Readiness
+
+### Objective and Scope
+
+Separate fictional inquiry operations from the screen code so a future
+API client can be introduced without rewriting all four views. This phase
+**does not connect to FastAPI** or deploy the frontend.
+
+The existing backend, PostgreSQL database, Kubernetes resources, and Traefik
+routing were not changed.
+
+### Implementation and Rationale
+
+**New file:** `applications/havenbridge-web/src/services/mockInquiryService.ts`
+
+The service starts with copies of the eight fictional records defined in
+`src/demoData.ts`. It provides these asynchronous operations:
+
+| Operation | Purpose |
+|---|---|
+| `listMockInquiries()` | Return copies of all fictional inquiries |
+| `getMockInquiry(id)` | Retrieve a fictional inquiry by its numeric ID; this operation is available but the screen does not currently call it |
+| `createMockInquiry(input)` | Validate demo input and add a fictional inquiry |
+| `updateMockInquiryStatus(id, status)` | Change the status of a fictional inquiry |
+
+The service keeps records in JavaScript module memory and returns copies to
+callers. Its approximately 200 ms delay simulates an asynchronous operation
+for future loading-state tests; it is **not** network latency or an HTTP
+request. Refreshing the page initializes the records again from the original
+eight fictional entries.
+
+**Updated file:** `applications/havenbridge-web/src/App.tsx`
+
+The React interface now calls the mock service to load records, create an
+inquiry, and change an inquiry's status. React state still controls what is
+displayed. The file also contains loading and load-error screens, a saving
+state, and feedback for creation or status-update errors. The frontend does
+not call `fetch()` or communicate with a backend in this phase.
+
+This separation prepares the UI for a later *design and security review* of
+real API integration; it does not by itself provide authentication,
+authorization, persistence, or production readiness.
+
+### Commands and Validation Evidence
+
+**Host: `syrus` — build and lint**
+
+```bash
+cd /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-web
+npm run build
+npm run lint
+```
+
+Observed after replacing `App.tsx` and adding the mock service:
+
+| Check | Observed result | Status |
+|---|---|---|
+| TypeScript and Vite build | Production build completed successfully | PASS |
+| Oxlint | 0 warnings and 0 errors | PASS |
+| Initial overview | Eight fictional inquiries loaded | PASS |
+| Create fictional inquiry | `HB-0009` appeared; total became 9 and New became 4 | PASS |
+| Change `HB-0005` status | `HB-0005` showed Referred; New changed 4 → 3 and Referred changed 2 → 3 while total stayed 9 | PASS |
+| Refresh browser | Total returned to 8; `HB-0009` disappeared; `HB-0005` returned to New | PASS |
+| Loading and load-error screens | Present in code, not independently exercised or timed in browser | NOT YET VERIFIED |
+| Service failure handling for create/status updates | Present in code, not independently simulated | NOT YET VERIFIED |
+
+Browser screenshots were reviewed for creation, status change, and the
+refresh reset. No automated unit or integration tests were run in this phase.
+
+**Result: PASS for the observed build, lint, creation, status-update, and
+refresh-reset checks.** Loading/error behavior remains to be verified.
+
+### Remaining Boundaries
+
+The mock service is local demonstration code. Its validation and simulated
+asynchronous behavior are not substitutes for server-side validation,
+authentication, authorization, audit logging, secure storage, or live API
+integration. Continue using fictional names and `example.org` addresses.
 
 ## Next Steps
 
-1. Complete and record the remaining frontend interaction checks.
-2. Review the first-release screen design and accessibility.
-3. Design and validate staff authentication and API authorization before
+1. Exercise and record the new loading/error states and the outstanding
+   one-character requester-name case; review accessibility.
+2. Review the first-release screen design and distinguish the future API
+   client contract from the current mock-service functions.
+3. Design and validate staff authentication and API authorization **before**
    connecting a deployed management interface to inquiry data.
-4. Connect the frontend to the existing FastAPI contract in a later phase.
+4. Connect the frontend to the existing FastAPI contract in a later phase,
+   with appropriate server-side validation and error handling.
 5. Review the Traefik routing plan before deploying the frontend.
 
 The existing FastAPI backend, PostgreSQL database, and Kubernetes routing
