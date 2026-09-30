@@ -6,12 +6,8 @@ import {
   type Inquiry,
   type InquiryStatus,
 } from "./demoData";
-import {
-  createMockInquiry,
-  listMockInquiries,
-  updateMockInquiryStatus,
-  type CreateInquiryInput,
-} from "./services/mockInquiryService";
+import { mockInquiryService } from "./services/mockInquiryService";
+import { type CreateInquiryInput } from "./services/inquiryService";
 import "./App.css";
 
 type Page = "overview" | "inquiries" | "new";
@@ -55,7 +51,7 @@ function App() {
   useEffect(() => {
     let cancelled = false;
 
-    listMockInquiries()
+    mockInquiryService.listInquiries()
       .then((records) => {
         if (!cancelled) {
           setInquiries(records);
@@ -148,7 +144,10 @@ function App() {
     clearNotice();
 
     try {
-      const updated = await updateMockInquiryStatus(selectedInquiry.id, statusDraft);
+      const updated = await mockInquiryService.updateInquiryStatus(
+        selectedInquiry.id,
+        statusDraft,
+      );
       setInquiries((current) =>
         current.map((item) => (item.id === updated.id ? updated : item)),
       );
@@ -179,7 +178,7 @@ function App() {
     clearNotice();
 
     try {
-      const created = await createMockInquiry(input);
+      const created = await mockInquiryService.createInquiry(input);
       setInquiries((current) => [created, ...current]);
       setSelectedId(created.id);
       setStatusDraft(created.status);

@@ -55,13 +55,15 @@ The supported statuses match the existing backend contract:
 ### Main Files
 
 The table below describes the current frontend structure, including the
-mock-service separation added in Phase 4.
+mock-service separation added in Phase 4 and the shared service contract added
+in Phase 6.
 
 | File | Purpose |
 |---|---|
 | `src/demoData.ts` | Defines inquiry types, statuses, service categories, and eight initial fictional records |
-| `src/services/mockInquiryService.ts` | Owns temporary fictional records and provides asynchronous list, get, create, and status-update operations |
-| `src/App.tsx` | Implements navigation, screens, filters, forms, loading/error states, and React state; calls the mock service for inquiry operations |
+| `src/services/inquiryService.ts` | Defines the shared `InquiryService` contract and `CreateInquiryInput` type |
+| `src/services/mockInquiryService.ts` | Implements the shared service contract using temporary fictional records in browser memory |
+| `src/App.tsx` | Implements navigation, screens, filters, forms, loading/error states, and React state; uses the mock service through the shared service boundary |
 | `src/App.css` | Styles the workspace and its responsive layout |
 | `src/index.css` | Provides application-wide styles |
 | `src/main.tsx` | Mounts the React application using the Vite scaffold |
@@ -395,21 +397,260 @@ and restoration of the original service.** These are targeted checks, not a
 complete accessibility audit or end-to-end test suite. The handling of failures
 during inquiry creation and status updates has not been separately simulated.
 
+## Frontend Phase 6 — API Integration Design and Shared Service Boundary
+
+### Objective and Scope
+
+Review the existing FastAPI inquiry contract and Kubernetes routing before
+connecting the frontend to live data. Introduce a shared frontend service
+contract so React can later switch from fictional browser data to a real API
+implementation without rewriting the screens.
+
+This phase does **not** connect the frontend to FastAPI, expose real inquiry
+records, change PostgreSQL, deploy the frontend, or modify Traefik.
+
+### Existing FastAPI Contract
+
+The backend inspection confirmed these routes:
+
+| Operation | Endpoint | Behavior |
+|---|---|---|
+| Create inquiry | `POST /api/v1/inquiries` | Validates and stores a new inquiry |
+| List inquiries | `GET /api/v1/inquiries` | Uses `limit` and `offset`; newest first |
+| Get one inquiry | `GET /api/v1/inquiries/{inquiry_id}` | Returns one inquiry or `404` |
+| Change status | `PATCH /api/v1/inquiries/{inquiry_id}/status` | Updates status and writes status history |
+
+The list endpoint currently defaults to 50 records, supports a maximum of 100,
+and uses offset-based pagination.
+
+The backend response fields are:
+
+```text
+id
+requester_name
+requester_email
+service_category
+message
+status
+created_at
+updated_at
+```
+
+The supported statuses are:
+
+```text
+new
+reviewing
+referred
+closed
+```
+
+These fields and status values are compatible with the frontend `Inquiry`
+TypeScript interface.
+
+### Create-Request Compatibility
+
+The frontend `CreateInquiryInput` contains:
+
+```text
+requester_name
+requester_email
+service_category
+message
+```
+
+These are the same four fields accepted by the FastAPI create schema.
+
+The backend remains the authoritative validator. It currently enforces:
+
+- requester name: 2–120 characters;
+- email: Pydantic `EmailStr` validation;
+- service category: 2–80 characters;
+- message: 10–2000 characters; and
+- rejection of unexpected request fields.
+
+The mock frontend performs similar checks for demonstration purposes, but its
+service-category rule is stricter because it only accepts values from
+`DEMO_CATEGORIES`. The backend currently accepts any category string that
+meets its length constraint. This difference is documented for a later
+integration decision rather than changed in this phase.
+
+### Authentication Finding
+
+The inspected inquiry routes use `Depends(get_db)` to obtain a SQLAlchemy
+database session.
+
+The application inspection did not identify an implemented OAuth, JWT,
+bearer-token, API-key, or equivalent staff-authentication mechanism protecting
+the inquiry routes.
+
+Therefore, the staff-facing frontend must **not** expose live inquiry listing,
+detail, or status-update operations until authentication and authorization are
+designed and validated.
+
+No authentication mechanism was added during Phase 6.
+
+### Current Traefik Routing Finding
+
+The existing HTTPS route uses:
+
+```text
+hostname: havenbridge.lab
+PathPrefix: /
+backend: havenbridge-api Service :80
+```
+
+This means the current hostname sends all matching paths to FastAPI.
+
+The proposed future routing model is:
+
+```text
+https://havenbridge.lab/
+        |
+        +-- /           -> havenbridge-web
+        |
+        +-- /api/...    -> havenbridge-api
+```
+
+This would allow the deployed frontend to use relative requests such as:
+
+```text
+/api/v1/inquiries
+```
+
+The proposed routing is a design only. No HTTPRoute, Gateway, Traefik,
+Service, or NetworkPolicy resource was changed in Phase 6.
+
+### Shared Frontend Service Contract
+
+**New file:**
+
+`applications/havenbridge-web/src/services/inquiryService.ts`
+
+Purpose: define a common contract for inquiry data operations.
+
+The contract contains:
+
+```text
+listInquiries()
+getInquiry(id)
+createInquiry(input)
+updateInquiryStatus(id, status)
+```
+
+It also defines the shared `CreateInquiryInput` type.
+
+The architecture is now:
+
+```text
+App.tsx
+   |
+   v
+InquiryService contract
+   |
+   +-- mockInquiryService   <- current
+   |
+   +-- apiInquiryService    <- future
+```
+
+### Mock Service Update
+
+**Updated file:**
+
+`applications/havenbridge-web/src/services/mockInquiryService.ts`
+
+The mock service now implements the shared `InquiryService` contract and
+exports a `mockInquiryService` object.
+
+Its behavior remains unchanged:
+
+- eight fictional records are loaded initially;
+- created inquiries remain temporary;
+- status changes remain temporary;
+- browser refresh restores the original records;
+- no FastAPI request is made;
+- no PostgreSQL write occurs; and
+- no real status-history record is created.
+
+### React Integration Update
+
+**Updated file:**
+
+`applications/havenbridge-web/src/App.tsx`
+
+React now calls the shared service object instead of importing individual
+mock-specific operation functions.
+
+Before:
+
+```text
+listMockInquiries()
+createMockInquiry()
+updateMockInquiryStatus()
+```
+
+After:
+
+```text
+mockInquiryService.listInquiries()
+mockInquiryService.createInquiry()
+mockInquiryService.updateInquiryStatus()
+```
+
+The application is still explicitly using fictional data.
+
+### Build, Lint, and Browser Regression Validation
+
+**Host: `syrus`**
+
+```bash
+cd /home/alabi/projects/havenbridge-ha-service-platform/applications/havenbridge-web
+
+npm run build
+npm run lint
+```
+
+Observed results:
+
+| Check | Observed result | Status |
+|---|---|---|
+| TypeScript and Vite build | Production build completed successfully | PASS |
+| Oxlint | 0 warnings and 0 errors | PASS |
+| Initial dataset | Original eight fictional inquiries loaded | PASS |
+| Create inquiry | `HB-0009` appeared; total increased to 9 | PASS |
+| Change status | `HB-0009` changed to Referred | PASS |
+| Refresh reset | Total returned to 8 and `HB-0009` disappeared | PASS |
+
+The regression check confirms that introducing the shared service boundary did
+not change the previously validated mock-data behavior.
+
+### Phase 6 Result
+
+**PASS for API-contract review, frontend/backend compatibility review,
+authentication and routing findings, shared-service implementation, build and
+lint validation, and browser regression testing.**
+
+The frontend remains a local, unauthenticated prototype using fictional data.
+A real `apiInquiryService` should not be activated for staff inquiry data until
+authentication, authorization, and routing changes are implemented and
+validated.
+
+
 ## Next Steps
 
-1. Review the first-release screen design and perform broader accessibility
-   testing, including keyboard activation, screen-reader behavior, and focus
-   management; these remain unverified.
-2. Separately simulate and validate failures during inquiry creation and
-   status updates; Phase 5 verified only the initial-load error display.
-3. Define the future API client contract and design and validate staff
-   authentication and API authorization **before** exposing real inquiries.
-4. Connect the frontend to the existing FastAPI contract in a later phase,
-   with appropriate server-side validation and error handling.
-5. Review the Traefik routing plan before deploying the frontend.
-6. Near project completion, compile the alphabetical HavenBridge glossary and
-   host-labeled command reference into a searchable PDF, using validated
-   repository documentation and runbooks without including secrets.
+1. Design and validate staff authentication and API authorization before
+   exposing real inquiry listing, detail, or status-update operations.
+2. Decide the final Traefik path-routing design for `havenbridge.lab`.
+3. Design the future `apiInquiryService`, including HTTP error handling and
+   server-side pagination, while keeping the mock implementation active.
+4. Perform broader accessibility testing, including screen-reader behavior
+   and focus management.
+5. Simulate failures during inquiry creation and status updates.
+6. Resolve the service-category validation difference between the frontend
+   fixed category list and the backend's current length-only rule.
+7. Near project completion, compile the alphabetical HavenBridge glossary and
+   host-labeled command reference into a searchable PDF without secrets.
 
-The existing FastAPI backend, PostgreSQL database, and Kubernetes routing
-remain unchanged during this prototype phase.
+The frontend remains a local, unauthenticated prototype using fictional data.
+The existing FastAPI backend, PostgreSQL database, and Kubernetes routing were
+not changed during Frontend Phase 6.

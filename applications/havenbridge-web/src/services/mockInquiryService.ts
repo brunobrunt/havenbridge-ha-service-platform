@@ -5,16 +5,17 @@ import {
   type Inquiry,
   type InquiryStatus,
 } from "../demoData";
+import {
+  type CreateInquiryInput,
+  type InquiryService,
+} from "./inquiryService";
 
-export type CreateInquiryInput = Pick<
-  Inquiry,
-  "requester_name" | "requester_email" | "service_category" | "message"
->;
+export type { CreateInquiryInput } from "./inquiryService";
 
 // Module-level memory: changes disappear when the page is refreshed.
 let records: Inquiry[] = DEMO_INQUIRIES.map((inquiry) => ({ ...inquiry }));
 
-// A predictable delay helps us validate loading states later.
+// A predictable delay helps us validate loading states.
 // It does not represent a real network request.
 const wait = () =>
   new Promise<void>((resolve) => {
@@ -116,3 +117,12 @@ export async function updateMockInquiryStatus(
 
   return copyInquiry(updated);
 }
+
+// Shared service object. React can eventually use this without knowing
+// whether the implementation comes from mock data or the real FastAPI API.
+export const mockInquiryService: InquiryService = {
+  listInquiries: listMockInquiries,
+  getInquiry: getMockInquiry,
+  createInquiry: createMockInquiry,
+  updateInquiryStatus: updateMockInquiryStatus,
+};
