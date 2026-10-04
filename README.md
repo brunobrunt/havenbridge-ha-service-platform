@@ -292,33 +292,86 @@ The backend application Services remain internal Kubernetes `ClusterIP` Services
 ### Kubernetes cluster topology
 
 ```text
-                  k8s-api.lab:6443
-                    172.16.10.30
-                           |
-                      kube-vip
-                           |
-          +----------------+----------------+
-          |                |                |
-      eph-cp01         eph-cp02         eph-cp03
-    172.16.10.31     172.16.10.32     172.16.10.33
-      API server       API server       API server
-      Controller       Controller       Controller
-      Scheduler        Scheduler        Scheduler
-      etcd member      etcd member      etcd member
-          |                |                |
-          +----------------+----------------+
-                           |
-              +------------+------------+
-              |                         |
-         eph-worker01              eph-worker02
-         172.16.10.34              172.16.10.35
+                         HAVENBRIDGE PLATFORM TOPOLOGY
+
+
+                         CONTROL PLANE ACCESS
+                         ====================
+
+                         k8s-api.lab:6443
+                           172.16.10.30
+                                  |
+                              kube-vip
+                                  |
+                 +----------------+----------------+
+                 |                |                |
+             eph-cp01         eph-cp02         eph-cp03
+           172.16.10.31     172.16.10.32     172.16.10.33
+             API server       API server       API server
+             Controller       Controller       Controller
+             Scheduler        Scheduler        Scheduler
+             etcd member      etcd member      etcd member
+                 |                |                |
+                 +----------------+----------------+
+                                  |
+                     +------------+------------+
+                     |                         |
+                eph-worker01              eph-worker02
+                172.16.10.34              172.16.10.35
+                     |                         |
+                     +------------+------------+
+                                  |
+                                  |
+                         APPLICATION ACCESS
+                         ==================
+                                  |
+                           havenbridge.lab
+                           172.16.10.40
+                                  |
+                         MetalLB Layer 2
+                                  |
+                                  v
+                    Traefik LoadBalancer Service
+                                  |
+                                  v
+                        Gateway API / HTTPRoute
+                                  |
+                                  v
+                       HavenBridge API Service
+                                  |
+                                  v
+                        Ready application Pods
+                                  |
+                                  v
+                             PostgreSQL
 ```
+The five virtual machines run on a Dell Precision 5810 host using KVM and
+libvirt.
 
-The basic idea was: the Kubernetes API needed one stable address that would not depend on any single control-plane VM.
+The three control-plane nodes provide a stacked-etcd quorum. `kube-vip`
+provides the highly available Kubernetes API endpoint at `172.16.10.30`,
+allowing clients such as `kubectl`, kubelets and other Kubernetes components
+to access the control plane without depending on a single control-plane node.
 
-The five virtual machines run on a Dell Precision 5810 host using KVM and libvirt.
+Application traffic uses a separate virtual address. MetalLB reserves and
+advertises `172.16.10.40` on the Layer 2 network, and that address is assigned
+to the Traefik `LoadBalancer` Service. The hostname `havenbridge.lab` resolves
+to `172.16.10.40`.
 
-The three control-plane nodes provide a stacked-etcd quorum. kube-vip exposes the shared Kubernetes API endpoint at `172.16.10.30`, while application workloads are scheduled primarily on the two worker nodes.
+Traefik receives application traffic at this address and uses Kubernetes
+Gateway API resources and HTTPRoutes to forward requests to the appropriate
+internal HavenBridge Services and application Pods.
+
+The two virtual IP addresses therefore serve different purposes:
+
+| Address | Component | Purpose |
+| --- | --- | --- |
+| `172.16.10.30` | kube-vip | Highly available Kubernetes API endpoint |
+| `172.16.10.40` | MetalLB / Traefik | HavenBridge application ingress |
+
+The worker-node addresses (`172.16.10.34` and `172.16.10.35`) remain the real
+node addresses. `172.16.10.40` is not an additional Kubernetes node; it is a
+virtual application-facing address advertised by MetalLB.
 
 
 ## End-to-End HavenBridge HTTP and HTTPS Request Flow
