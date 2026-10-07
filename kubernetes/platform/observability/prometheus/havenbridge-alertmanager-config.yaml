@@ -36,9 +36,20 @@ spec:
           message: |
             Severity: {{ .CommonLabels.severity }}
 
+            {{ if eq .Status "firing" }}
             {{ range .Alerts }}
             Summary: {{ .Annotations.summary }}
             Description: {{ .Annotations.description }}
+            {{ end }}
+            {{ else if eq .CommonLabels.alertname "HavenBridgeAPIUnavailable" }}
+            Summary: HavenBridge API availability restored
+            Description: Prometheus can now detect healthy HavenBridge API scrape targets.
+            {{ else if eq .CommonLabels.alertname "HavenBridgePostgreSQLConnectivityFailure" }}
+            Summary: HavenBridge PostgreSQL Service connectivity restored
+            Description: The PostgreSQL Service now has a Ready EndpointSlice backend and application connectivity has recovered.
+            {{ else }}
+            Summary: {{ .CommonLabels.alertname }} has recovered
+            Description: The monitored condition has returned to a healthy state.
             {{ end }}
 
       slackConfigs:
@@ -54,7 +65,18 @@ spec:
           text: |
             Severity: {{ .CommonLabels.severity }}
 
+            {{ if eq .Status "firing" }}
             {{ range .Alerts }}
             *Summary:* {{ .Annotations.summary }}
             *Description:* {{ .Annotations.description }}
+            {{ end }}
+            {{ else if eq .CommonLabels.alertname "HavenBridgeAPIUnavailable" }}
+            *Summary:* HavenBridge API availability restored
+            *Description:* Prometheus can now detect healthy HavenBridge API scrape targets.
+            {{ else if eq .CommonLabels.alertname "HavenBridgePostgreSQLConnectivityFailure" }}
+            *Summary:* HavenBridge PostgreSQL Service connectivity restored
+            *Description:* The PostgreSQL Service now has a Ready EndpointSlice backend and application connectivity has recovered.
+            {{ else }}
+            *Summary:* {{ .CommonLabels.alertname }} has recovered
+            *Description:* The monitored condition has returned to a healthy state.
             {{ end }}
