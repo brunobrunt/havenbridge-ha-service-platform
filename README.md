@@ -29,6 +29,24 @@ Authorized staff will eventually be able to:
 * Receive notifications when requests exceed a defined response period.
 * Access approved internal policies or employee resources.
 
+### Real-World Use Case: Home Care Service Request
+
+**Scenario:** Imagine a family needs home care assistance for an elderly parent.
+
+HavenBridge is designed to manage the request through the following workflow:
+
+1. **Submit:** The family submits a request for home care assistance through HavenBridge using the `/api/v1/inquiries` endpoint.
+2. **Review:** The healthcare provider reviews the request and determines the appropriate next action.
+3. **Refer:** When appropriate, the request can be moved to the `Referred` stage for further coordination or service follow-up.
+4. **Track:** The request progresses through the current workflow statuses: `New → Reviewing → Referred → Closed`.
+5. **Close:** Once the request has been addressed, the provider closes it.
+
+**Business Value:** This centralized process helps service providers organize inquiries, track progress, improve accountability, and reduce the risk of missed or overlooked requests.
+
+**Technical Foundation:** HavenBridge uses a FastAPI backend and PostgreSQL database, supported by highly available Kubernetes infrastructure, persistent storage, networking, observability, and CI/CD automation.
+
+**Implementation Note:** This is an illustrative workflow representing the intended application functionality. The current implementation supports inquiry submission, review-state tracking, referral-state tracking, and closure using synthetic test data. Staff authentication, authorization, and the full end-to-end service-management experience are still under development.
+
 The Kubernetes cluster is not the final product by itself. It is the highly available foundation on which the operational application, database, routing, persistent storage, monitoring, and alerting services will run.
 ---
 
