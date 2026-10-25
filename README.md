@@ -1839,6 +1839,21 @@ Application alerts:
 
 Only synthetic inquiry data will be used during testing.
 
+
+#### AI Incident Reporting — Zapier Proof of Concept (October 2026)
+
+A separate proof of concept demonstrates AI-assisted incident reporting using synthetic HavenBridge incident data.
+
+**Workflow:** Google Sheets → Zapier → AI by Zapier → Gmail → Human review.
+
+The workflow generates structured incident summaries, possible causes, read-only troubleshooting suggestions, and recommended next steps. It does not connect to the live Kubernetes cluster or perform automated remediation.
+
+**Status:** Published and tested with synthetic incidents.
+
+**Documentation:** [Phase 1 — Zapier AI Incident Reporting](docs/ai-incident-reporting/phase-1-zapier/README.md)
+
+This proof of concept is separate from the planned secure, read-only Kubernetes Operations Agent.
+
 ---
 
 ## High-Level Validation Commands
