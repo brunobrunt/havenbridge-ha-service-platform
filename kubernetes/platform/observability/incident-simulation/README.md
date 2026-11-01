@@ -2968,14 +2968,14 @@ preserved validation evidence
 ## Operational Incident — October 2026 Loki / NFS CSI Recovery Verification
 
 **Incident type:** Unplanned storage-mount interruption affecting centralized logging  
-**Affected workload:** \`observability/havenbridge-loki-0\` on \`eph-worker01\`  
+**Affected workload:** `observability/havenbridge-loki-0` on `eph-worker01`
 **Verification date:** October 31, 2026  
 **Status:** Loki readiness and end-to-end log retrieval verified; recovery mechanism and original root cause remain unconfirmed.
 
 ### Symptoms observed during the earlier incident
 
-- \`havenbridge-loki-0\` was observed in \`ContainerCreating\` with an NFS volume mount problem.
-- Pod events included \`FailedMount\` and \`nfs.csi.k8s.io driver not found in registered CSI drivers\`.
+- `havenbridge-loki-0` was observed in `ContainerCreating` with an NFS volume mount problem.
+- Pod events included `FailedMount` and `nfs.csi.k8s.io driver not found in registered CSI drivers`.
 - At that time, Loki readiness/log label queries were unsuccessful or empty.
 - These are historical observations, not evidence of an ongoing October 31 failure.
 
@@ -2985,62 +2985,62 @@ The NFS CSI driver is the connector Kubernetes uses to attach the NFS storage ne
 
 ### Commands executed and observed evidence
 
-All commands below were run on **host \`eph-cp01\`**, as user \`mino\`, unless marked otherwise. These commands are read-only; port-forward only establishes a temporary local connection.
+All commands below were run on **host `eph-cp01`**, as user `mino`, unless marked otherwise. These commands are read-only; port-forward only establishes a temporary local connection.
 
 **1. Node and Pod baseline — October 31**
 
-\`\`\`bash
+```bash
 # HOST: eph-cp01
 kubectl get nodes -o wide
 kubectl get pods -A -o wide
-\`\`\`
+```
 
-Observed: all three control-plane nodes and both worker nodes were \`Ready\` (Kubernetes v1.36.2). Both API Pods and PostgreSQL were Ready. \`havenbridge-loki-0\` was \`2/2 Running\` on \`eph-worker01\`; all five \`havenbridge-alloy\` Pods were \`2/2 Running\`; the NFS CSI node Pods were \`3/3 Running\`. Some components had historical restarts; in particular, one API Pod showed 109 restarts, last reported around 31 hours earlier. This count requires separate investigation and is not evidence of a current Loki failure.
+Observed: all three control-plane nodes and both worker nodes were `Ready` (Kubernetes v1.36.2). Both API Pods and PostgreSQL were Ready. `havenbridge-loki-0` was `2/2 Running` on `eph-worker01`; all five `havenbridge-alloy` Pods were `2/2 Running`; the NFS CSI node Pods were `3/3 Running`. Some components had historical restarts; in particular, one API Pod showed 109 restarts, last reported around 31 hours earlier. This count requires separate investigation and is not evidence of a current Loki failure.
 
 **2. Verify NFS CSI driver registration on both worker nodes**
 
-\`\`\`bash
+```bash
 # HOST: eph-cp01
 kubectl get csinode eph-worker01 -o yaml
 kubectl get csinode eph-worker02 -o yaml
-\`\`\`
+```
 
-Observed: each CSINode declared \`nfs.csi.k8s.io\` under \`spec.drivers\`. Driver registration was therefore present at verification time. Registration alone does not test future remount behavior or NFS server resilience.
+Observed: each CSINode declared `nfs.csi.k8s.io` under `spec.drivers`. Driver registration was therefore present at verification time. Registration alone does not test future remount behavior or NFS server resilience.
 
 **3. Identify Loki containers**
 
-\`\`\`bash
+```bash
 # HOST: eph-cp01
 kubectl -n observability get pod havenbridge-loki-0 \
   -o jsonpath='{.status.containerStatuses[*].name}{"\n"}'
-\`\`\`
+```
 
-Observed: \`loki loki-sc-rules\`. Attempts to run \`wget\`, \`sh\`, or \`bash\` inside the minimal Loki container failed because those executables were absent. These failures were missing-tool errors, **not** Loki service failures.
+Observed: `loki loki-sc-rules`. Attempts to run `wget`, `sh`, or `bash` inside the minimal Loki container failed because those executables were absent. These failures were missing-tool errors, **not** Loki service failures.
 
 **4. Check Loki HTTP readiness via port-forward**
 
-\`\`\`bash
+```bash
 # HOST: eph-cp01 — Terminal 1 (leave running during checks)
 kubectl -n observability port-forward pod/havenbridge-loki-0 3100:3100
 
 # HOST: eph-cp01 — Terminal 2
 curl -i http://127.0.0.1:3100/ready
-\`\`\`
+```
 
-Observed: \`HTTP/1.1 200 OK\` and body \`ready\`. Port-forwarding provides a temporary loopback connection rather than requiring a shell or curl inside Loki. Stop Terminal 1 with \`Ctrl+C\` when checks finish.
+Observed: `HTTP/1.1 200 OK` and body `ready`. Port-forwarding provides a temporary loopback connection rather than requiring a shell or curl inside Loki. Stop Terminal 1 with `Ctrl+C` when checks finish.
 
 **5. Verify Loki label discovery**
 
-\`\`\`bash
+```bash
 # HOST: eph-cp01 — Terminal 2 (port-forward active)
 curl -sS http://127.0.0.1:3100/loki/api/v1/labels
-\`\`\`
+```
 
-Observed: \`status: success\` and labels including \`app\`, \`cluster\`, \`container\`, \`namespace\`, \`node\`, and \`pod\`. This establishes accessible log label metadata, but alone does not prove log freshness.
+Observed: `status: success` and labels including `app`, `cluster`, `container`, `namespace`, `node`, and `pod`. This establishes accessible log label metadata, but alone does not prove log freshness.
 
 **6. Retrieve recent HavenBridge API logs from both workers**
 
-\`\`\`bash
+```bash
 # HOST: eph-cp01 — Terminal 2 (port-forward active)
 curl -sS -G 'http://127.0.0.1:3100/loki/api/v1/query_range' \
   --data-urlencode 'query={namespace="havenbridge"}' \
@@ -3048,31 +3048,29 @@ curl -sS -G 'http://127.0.0.1:3100/loki/api/v1/query_range' \
   --data-urlencode 'direction=backward' \
   --data-urlencode 'since=30m' \
   | python3 -m json.tool
-\`\`\`
+```
 
-Observed: \`status: success\`, five recent entries, and two distinct API streams:
+Observed: `status: success`, five recent entries, and two distinct API streams:
 
 | Pod | Worker node | Evidence |
 | --- | --- | --- |
-| \`havenbridge-api-6786db5c64-7q4b5\` | \`eph-worker02\` | \`GET /health/ready\` and \`GET /health/live\` returned 200 |
-| \`havenbridge-api-6786db5c64-z2rn2\` | \`eph-worker01\` | \`GET /health/live\`, \`GET /health/ready\`, and \`GET /metrics\` returned 200 |
+| `havenbridge-api-6786db5c64-7q4b5` | `eph-worker02` | `GET /health/ready` and `GET /health/live` returned 200 |
+| `havenbridge-api-6786db5c64-z2rn2` | `eph-worker01` | `GET /health/live`, `GET /health/ready`, and `GET /metrics` returned 200 |
 
-The stream's collection job was \`loki.source.kubernetes.pod_logs\`, consistent with Grafana Alloy's configured Kubernetes log source.
+The stream's collection job was `loki.source.kubernetes.pod_logs`, consistent with Grafana Alloy's configured Kubernetes log source.
 
 ### Screenshot evidence — Grafana Explore
 
 Grafana Explore was queried with:
 
-\`\`\`logql
+```logql
 {namespace="havenbridge"}
-\`\`\`
+```
 
-The supplied screenshot shows matching API log entries, the log-volume timeline, HTTP 200 health/metrics requests, and logs from the \`havenbridge\` namespace.
+The supplied screenshot shows matching API log entries, the log-volume timeline, HTTP 200 health/metrics requests, and logs from the `havenbridge` namespace.
 
-**Evidence image to add alongside this README:**
-\`screenshots/incident-04-loki-nfs-csi-recovery/2026-10-31-grafana-loki-api-logs.png\`.
+![Grafana Explore showing restored HavenBridge API logs from Loki](screenshots/incident-04-loki-nfs-csi-recovery/2026-10-31-grafana-loki-api-logs.png)
 
-> The screenshot is available separately as a captured local file and must be committed into the image path above before changing this reference into an embedded Markdown image. Do not describe the screenshot as committed until verified on GitHub.
 
 ### Verified recovery versus unresolved investigation
 
@@ -3081,8 +3079,8 @@ The supplied screenshot shows matching API log entries, the log-volume timeline,
 | Five Kubernetes nodes Ready | PASS |
 | Both API replicas and PostgreSQL Pod Ready | PASS |
 | NFS CSI driver registered on both workers | PASS |
-| Loki Pod \`2/2 Running\` | PASS |
-| Loki \`/ready\` HTTP 200 | PASS |
+| Loki Pod `2/2 Running` | PASS |
+| Loki `/ready` HTTP 200 | PASS |
 | Loki label API returns labels | PASS |
 | Recent API logs retrieved from two different workers | PASS |
 | Grafana Explore shows the same class of API logs | PASS |
@@ -3092,7 +3090,7 @@ The supplied screenshot shows matching API log entries, the log-volume timeline,
 ### Lessons learned and follow-up
 
 1. Separate **Pod state**, **CSI registration**, **application readiness**, and **end-to-end log delivery**: each answers a different question.
-2. A minimal/distroless container may lack shells and HTTP clients. Missing executables are not proof of an application outage; prefer temporary \`kubectl port-forward\` plus host-side \`curl\` for these diagnostics.
+2. A minimal/distroless container may lack shells and HTTP clients. Missing executables are not proof of an application outage; prefer temporary `kubectl port-forward` plus host-side `curl` for these diagnostics.
 3. Recovery verification is not root-cause analysis. Do not attribute recovery to operator action or to an automatic restart without supporting events and timestamps.
 4. Investigate the historical API restart count separately; do not restart healthy workloads merely because restarts were recorded.
 5. Preserve the Grafana screenshot and CLI evidence, and review NFS CSI recovery behavior after future host power interruptions.
