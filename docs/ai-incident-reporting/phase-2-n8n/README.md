@@ -61,3 +61,52 @@ No packages, containers, or system configuration were modified during Stage 0.
 Stage 0 preflight checks passed.
 
 **Next:** Stage 1 — Verify Docker daemon access and inspect existing containers before deploying n8n.
+
+
+## Stage 1 — Docker Engine Verification
+
+**Host:** syrus
+**Status:** PASSED
+**Purpose:** Verify Docker daemon connectivity and inspect existing containers before installing n8n.
+
+### Commands Executed
+
+```bash
+docker info --format '{{.ServerVersion}}'
+
+docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+```
+
+### Verified Results
+
+| Check | Result |
+|---|---|
+| Docker Engine version | 29.9.2 |
+| Docker daemon connectivity | Successful |
+| Running Docker containers | None |
+| Existing published container ports | None reported |
+
+### ELI10 — Command Explanations
+
+- `docker info`: Requests information from the Docker engine.
+- `--format`: Controls how the output is displayed.
+- `{{.ServerVersion}}`: Returns the Docker engine version.
+- `docker ps`: Lists running containers.
+- `{{.Names}}`: Displays container names.
+- `{{.Status}}`: Displays container status.
+- `{{.Ports}}`: Displays published or exposed ports.
+- `\t`: Inserts a tab between output columns.
+
+### Findings
+
+1. The Docker client successfully connected to the Docker daemon.
+2. Docker Engine version 29.9.2 was confirmed.
+3. No running Docker containers were found.
+4. No existing Docker port mappings were reported.
+5. No configuration changes were made during verification.
+
+### Conclusion
+
+Docker is operational and ready for the next deployment preparation checks.
+
+**Next:** Prepare an isolated n8n Docker Compose deployment with persistent storage and local-only access.
