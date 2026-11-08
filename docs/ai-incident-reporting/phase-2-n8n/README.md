@@ -110,3 +110,70 @@ docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
 Docker is operational and ready for the next deployment preparation checks.
 
 **Next:** Prepare an isolated n8n Docker Compose deployment with persistent storage and local-only access.
+
+
+## Stage 2 — n8n Deployment
+
+### Step 2.1 — Prepare the Installation Directory
+
+**Host:** syrus
+
+**Directory:** `/home/alabi/projects/ai-learning/n8n-lab`
+
+Commands executed:
+
+```bash
+mkdir -p ~/projects/ai-learning/n8n-lab
+cd ~/projects/ai-learning/n8n-lab
+pwd
+ls -la
+```
+
+**Verified result:** The directory was created successfully and was initially empty.
+
+### Step 2.2 — Create and Validate Docker Compose Configuration
+
+**Configuration file:** `/home/alabi/projects/ai-learning/n8n-lab/compose.yaml`
+
+The Compose configuration defines:
+
+- One n8n service.
+- A Docker-managed persistent volume named `n8n_data`.
+- Localhost-only port binding (`127.0.0.1:5678:5678`).
+- Edmonton timezone configuration.
+- Automatic container restart unless explicitly stopped.
+- n8n settings-file permission enforcement and task runners.
+
+Commands executed:
+
+```bash
+docker compose config --quiet
+echo "Compose validation exit code: $?"
+docker compose config --services
+```
+
+Verified output:
+
+```text
+Compose validation exit code: 0
+n8n
+```
+
+### ELI10 — Command Explanations
+
+- `docker compose config`: Reads and validates the Compose configuration.
+- `--quiet`: Suppresses normal output; errors are still reported.
+- `$?`: Displays the exit code of the immediately preceding command.
+- `--services`: Lists the service names defined in Compose.
+
+### Findings
+
+1. The installation directory exists and is separate from HavenBridge's Kubernetes infrastructure.
+2. Docker Compose accepted the configuration.
+3. The `n8n` service was detected.
+4. No containers have been started during these steps.
+5. The container image version has not yet been pinned.
+
+### Next Step
+
+Pin a tested n8n image version, validate the updated Compose configuration, and then deploy the container.
