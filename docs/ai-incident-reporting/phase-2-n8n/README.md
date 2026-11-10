@@ -177,3 +177,195 @@ n8n
 ### Next Step
 
 Pin a tested n8n image version, validate the updated Compose configuration, and then deploy the container.
+
+
+## Step 2.3 — Deploy and Validate n8n
+
+**Host:** syrus
+**Deployment directory:** `/home/alabi/projects/ai-learning/n8n-lab`
+**Docker image:** `docker.n8n.io/n8nio/n8n:2.46.7`
+**Status:** PASSED
+
+### Architecture
+
+The deployment uses Docker Compose to manage one n8n service with persistent storage.
+
+- Container name: `n8n-lab`
+- Compose service: `n8n`
+- HTTP port: `5678`
+- Host binding: `127.0.0.1`
+- Persistent volume: `n8n-lab_n8n_data`
+- Timezone: `America/Edmonton`
+
+The localhost binding limits access through the published host port to the local machine.
+
+### Security Configuration
+
+A dedicated `.env` file stores the n8n encryption key.
+
+The file is excluded from Git tracking using `.gitignore`.
+
+The encryption key must not be printed in terminal logs, committed to GitHub, or replaced after credentials have been saved without a planned migration.
+
+An encryption key exposed during initial setup was rotated before the owner account and workflows were established. The original test volume was replaced during that reset.
+
+### Docker Compose Validation
+
+```bash
+# HOST: syrus
+cd ~/projects/ai-learning/n8n-lab
+
+docker compose config --quiet
+echo "Validation exit code: $?"
+```
+
+**Verified result:** Exit code `0`.
+
+**ELI10:**
+
+- `cd`: Enter the application directory.
+- `docker compose config`: Validate the Compose configuration.
+- `--quiet`: Suppress normal configuration output, avoiding unnecessary exposure of environment values.
+- `$?`: Return the exit code of the immediately preceding command.
+- `0`: Success.
+
+### Deployment and Container Status
+
+```bash
+# HOST: syrus
+docker compose up -d
+docker compose ps
+```
+
+**ELI10:**
+
+- `up`: Create or start services described in the Compose file.
+- `-d`: Run containers in detached/background mode.
+- `ps`: Display containers associated with the Compose project.
+
+**Verified result:** The `n8n-lab` container was running with the pinned image `2.46.7`.
+
+### Application Health Verification
+
+```bash
+# HOST: syrus
+curl -i http://127.0.0.1:5678/healthz
+```
+
+**Verified result:**
+
+```text
+HTTP/1.1 200 OK
+
+{"status":"ok"}
+```
+
+**ELI10:**
+
+- `curl`: Send an HTTP request.
+- `-i`: Include response headers.
+- `127.0.0.1`: Connect to the local host.
+- `5678`: n8n's published HTTP port.
+- `/healthz`: Application health endpoint.
+
+### Persistent Storage Verification
+
+```bash
+# HOST: syrus
+docker volume ls --filter name=n8n-lab_n8n_data
+```
+
+**Verified result:** Docker listed `n8n-lab_n8n_data`.
+
+**ELI10:**
+
+- `docker volume ls`: List Docker-managed volumes.
+- `--filter`: Limit the displayed results.
+- `name=...`: Select volumes matching the specified name.
+
+The named volume stores n8n application data independently of the container lifecycle.
+
+A volume existing does not by itself prove data persistence; that was separately checked through the owner-account restart test.
+
+## Step 2.4 — Owner Account and Persistence Verification
+
+The n8n owner account was created through the browser interface.
+
+The Community Edition license was activated successfully.
+
+A controlled restart was performed:
+
+```bash
+# HOST: syrus
+docker compose restart n8n
+docker compose ps
+```
+
+The first HTTP health check returned a connection reset while n8n was still initializing.
+
+A subsequent health check returned HTTP `200 OK`.
+
+After refreshing the browser, the existing owner account remained accessible without repeating registration.
+
+**Result:** Application restart and owner-account persistence verification PASSED.
+
+**ELI10:**
+
+- `restart`: Restart an existing service container.
+- `n8n`: Compose service name, not container name.
+- `ps`: Verify the container is running.
+
+## Step 2.5 — Configuration Cleanup
+
+The initial startup logs identified `N8N_RUNNERS_ENABLED` as an obsolete environment setting.
+
+The following line was removed from `compose.yaml`:
+
+```yaml
+- N8N_RUNNERS_ENABLED=true
+```
+
+The configuration was reapplied and the application restarted successfully.
+
+The subsequent logs confirmed:
+
+```text
+Registered runner "JS Task Runner"
+```
+
+The deprecated setting warning no longer appeared.
+
+**Result:** Configuration cleanup PASSED.
+
+## Step 2.6 — Known Warnings and Limitations
+
+The following warnings remain:
+
+1. Python task runner could not start because Python 3 is unavailable inside the n8n container.
+2. Internal task-runner mode is deprecated.
+3. Future default changes are announced for unverified community packages, task timeouts, and compression limits.
+
+These warnings did not prevent the current n8n service from starting.
+
+**Future consideration:** Evaluate external task runners before production deployment or introducing workflows requiring Python Code nodes.
+
+No automated remediation was performed.
+
+## Stage 2 Conclusion
+
+The self-hosted n8n deployment is operational.
+
+Verified capabilities include:
+
+- Docker Compose configuration validation
+- Pinned n8n image
+- Localhost-only HTTP access
+- Persistent Docker storage
+- Owner-account creation
+- Community license activation
+- Successful container restart
+- Account persistence
+- Healthy HTTP endpoint
+- JavaScript task-runner registration
+
+**Next:** Stage 3 — Google Sheets integration for synthetic HavenBridge incident records.
